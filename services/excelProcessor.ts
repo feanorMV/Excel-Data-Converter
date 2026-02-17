@@ -1,5 +1,5 @@
 
-import type { StatusUpdateCallback, ExcelRow, CsvFile, FileType, CsvGenerationOptions } from '../types';
+import type { StatusUpdateCallback, ExcelRow, CsvFile, FileType, CsvGenerationOptions } from '../types.ts';
 
 declare var XLSX: any;
 
@@ -457,7 +457,8 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
     df_template.forEach(row => {
         const item_uid = String(row['UID*']);
         
-        let erpCategoryUid: string | number | null = null;
+        // FIX: Allow Date type for erpCategoryUid to handle cases where Excel cells are parsed as dates.
+        let erpCategoryUid: string | number | Date | null = null;
         // Find the most specific category for the item. Prioritize UID, fallback to Name.
         // Iterate backwards from level 6 to 1 to find the most specific category first.
         for (let i = 6; i >= 1; i--) {
@@ -491,7 +492,8 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
 
         const brandUidValue = row['Brand UID'];
         const brandNameValue = row['Brand'];
-        let effectiveBrandUid: string | number | null = null;
+        // FIX: Allow Date type for effectiveBrandUid to handle cases where Excel cells are parsed as dates.
+        let effectiveBrandUid: string | number | Date | null = null;
         if (brandUidValue !== null && brandUidValue !== undefined && String(brandUidValue).trim() !== '') {
             effectiveBrandUid = brandUidValue;
         } else if (brandNameValue !== null && brandNameValue !== undefined && String(brandNameValue).trim() !== '') {
@@ -500,7 +502,8 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
 
         const manufUidValue = row['Manufacturer UID'];
         const manufNameValue = row['Manufacturer'];
-        let effectiveManufUid: string | number | null = null;
+        // FIX: Allow Date type for effectiveManufUid to handle cases where Excel cells are parsed as dates.
+        let effectiveManufUid: string | number | Date | null = null;
         if (manufUidValue !== null && manufUidValue !== undefined && String(manufUidValue).trim() !== '') {
             effectiveManufUid = manufUidValue;
         } else if (manufNameValue !== null && manufNameValue !== undefined && String(manufNameValue).trim() !== '') {
@@ -555,7 +558,8 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
             });
         }
         
-        let previousLevelEffectiveUid: string | number | null = null;
+        // FIX: Allow Date type for previousLevelEffectiveUid to handle cases where Excel cells are parsed as dates.
+        let previousLevelEffectiveUid: string | number | Date | null = null;
         for (let level = 1; level <= 6; level++) {
             const uidCol = `Category level ${level} UID`;
             const nameCol = `Category level ${level}`;
@@ -563,7 +567,8 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
             const currentUidValue = row[uidCol];
             const currentNameValue = row[nameCol];
 
-            let currentLevelEffectiveUid: string | number | null = null;
+            // FIX: Allow Date type for currentLevelEffectiveUid to handle cases where Excel cells are parsed as dates.
+            let currentLevelEffectiveUid: string | number | Date | null = null;
             
             if (currentUidValue !== null && currentUidValue !== undefined && String(currentUidValue).trim() !== '') {
                 currentLevelEffectiveUid = currentUidValue;

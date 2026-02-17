@@ -2,8 +2,8 @@
 
 import React, { useState, useCallback, useRef } from 'react';
 import { FolderUp, Download, RefreshCw, AlertTriangle, CheckCircle, Loader2, FileCheck2, FileText, XCircle } from 'lucide-react';
-import { generateCsvsFromExcel } from './services/excelProcessor';
-import type { StatusUpdate, FileType, CsvFile, CsvGenerationOptions } from './types';
+import { generateCsvsFromExcel } from './services/excelProcessor.ts';
+import type { StatusUpdate, FileType, CsvFile, CsvGenerationOptions } from './types.ts';
 
 // Fix for non-standard directory attributes on input element
 declare module 'react' {
@@ -387,7 +387,7 @@ const App: React.FC = () => {
                 </main>
                  <footer className="text-center mt-8">
                     <p className="text-sm text-gray-500">
-                        Enhanced for batch processing by a world-class AI engineer.
+                        FOR INTERNAL USE ONLY
                     </p>
                 </footer>
             </div>
