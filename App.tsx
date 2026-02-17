@@ -42,7 +42,7 @@ const getTodayDateString = (): string => {
     return `${year}${month}${day}`;
 };
 
-const App: React.FC = () => {
+export const App: React.FC = () => {
     const [fileInfos, setFileInfos] = useState<FileInfo[]>([]);
     const [archiveName, setArchiveName] = useState<string>('data_export');
     const [processingState, setProcessingState] = useState<ProcessingState>('idle');
@@ -387,12 +387,10 @@ const App: React.FC = () => {
                 </main>
                  <footer className="text-center mt-8">
                     <p className="text-sm text-gray-500">
-                        FOR INTERNAL USE ONLY
+                        For Internal Use Only
                     </p>
                 </footer>
             </div>
         </div>
     );
 };
-
-export default App;
