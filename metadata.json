@@ -1,0 +1,5 @@
+{
+  "name": "Excel Item Master Converter",
+  "description": "A tool to process an Excel item master file, split it into multiple structured CSV files, and package them into a downloadable ZIP archive. Built with React and TypeScript.",
+  "requestFramePermissions": []
+}
