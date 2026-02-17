@@ -1,5 +1,5 @@
 
-import type { StatusUpdateCallback, ExcelRow, CsvFile, FileType } from '../types';
+import type { StatusUpdateCallback, ExcelRow, CsvFile, FileType, CsvGenerationOptions } from '../types';
 
 declare var XLSX: any;
 
@@ -32,11 +32,14 @@ function arrayToCsv(data: Record<string, any>[], columns: string[]): string {
 }
 
 function excelSerialDateToJSDate(serial: number): Date {
-    // Formula to convert Excel serial number to JS Date
     // 25569 is the number of days from 1900-01-01 to 1970-01-01 (epoch).
-    // Excel's leap year bug for 1900 is handled by this offset for dates after Feb 1900.
-    return new Date((serial - 25569) * 86400 * 1000);
+    const utcMilliseconds = (serial - 25569) * 86400 * 1000;
+    const utcDate = new Date(utcMilliseconds);
+    // Create a new Date object in the local timezone using the UTC date parts.
+    // This correctly translates the calendar date without timezone shifts.
+    return new Date(utcDate.getUTCFullYear(), utcDate.getUTCMonth(), utcDate.getUTCDate());
 }
+
 
 function formatDateToYYYYMMDD(date: Date): string {
     const year = date.getFullYear();
@@ -113,7 +116,10 @@ function processStoresFile(workbook: any, sheetName: string, updateStatus: Statu
     const storesData = dataRows.map(row => {
         const rowObject: ExcelRow = {};
         headers.forEach((header, index) => {
-            if (header) rowObject[header] = row[index];
+            if (header) {
+                const value = row[index];
+                rowObject[header] = typeof value === 'string' ? value.trim() : value;
+            }
         });
         
         return {
@@ -146,7 +152,7 @@ function processStoresFile(workbook: any, sheetName: string, updateStatus: Statu
 /**
  * Processes a "Store Items" file containing assortment, pricing, and supplier data.
  */
-function processStoreItemsFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback): CsvFile[] {
+function processStoreItemsFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions): CsvFile[] {
     updateStatus({ message: `Processing Store Items file from sheet "${sheetName}"...`, status: 'processing' });
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
@@ -172,7 +178,10 @@ function processStoreItemsFile(workbook: any, sheetName: string, updateStatus: S
     dataRows.forEach(row => {
         const rowObject: ExcelRow = {};
         headers.forEach((header, index) => {
-            if (header) rowObject[header] = row[index];
+            if (header) {
+                const value = row[index];
+                rowObject[header] = typeof value === 'string' ? value.trim() : value;
+            }
         });
 
         const storeUid = rowObject['Store UID*'];
@@ -212,7 +221,7 @@ function processStoreItemsFile(workbook: any, sheetName: string, updateStatus: S
         content: arrayToCsv(itemsData, ['item_uid', 'store_uid', 'is_active_planogram', 'purchase_price', 'retail_price', 'external_supplier_uid'])
     });
 
-    if (suppliersMap.size > 0) {
+    if ((options.suppliers ?? true) && suppliersMap.size > 0) {
         csvs.push({
             name: `suppliers_${dateStr}.csv`,
             content: arrayToCsv(Array.from(suppliersMap.values()), ['supplier_uid', 'name', 'is_deleted'])
@@ -249,21 +258,31 @@ function processFactsFile(workbook: any, sheetName: string, updateStatus: Status
     const factsData = dataRows.map(row => {
         const rowObject: ExcelRow = {};
         headers.forEach((header, index) => {
-            if (header) rowObject[header] = row[index];
+            if (header) {
+                const value = row[index];
+                rowObject[header] = typeof value === 'string' ? value.trim() : value;
+            }
         });
 
         let formattedDate: string | null = null;
         const dateValue = rowObject['Date*'];
+
         if (dateValue) {
             let jsDate: Date | null = null;
-            if (typeof dateValue === 'number' && dateValue > 1) {
+            if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
+                // Path 1: Already a valid Date object (from cellDates:true)
+                jsDate = dateValue;
+            } else if (typeof dateValue === 'number' && dateValue > 1) {
+                // Path 2: Excel serial number
                 jsDate = excelSerialDateToJSDate(dateValue);
             } else {
+                // Path 3: Try to parse from a string
                 const d = new Date(String(dateValue));
                 if (!isNaN(d.getTime())) {
                     jsDate = d;
                 }
             }
+            
             if (jsDate) {
                 formattedDate = formatDateToYYYYMMDD(jsDate);
             }
@@ -299,8 +318,8 @@ function processFactsFile(workbook: any, sheetName: string, updateStatus: Status
 /**
  * Processes the original "Item Master" file format (V1).
  */
-function processItemMasterFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback): CsvFile[] {
-    updateStatus({ message: `Processing Item Master file from sheet "${sheetName}"...`, status: 'processing' });
+function processItemMasterFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions): CsvFile[] {
+    updateStatus({ message: `Processing Masteritems file from sheet "${sheetName}"...`, status: 'processing' });
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
     
@@ -314,7 +333,7 @@ function processItemMasterFile(workbook: any, sheetName: string, updateStatus: S
             break;
         }
     }
-    if (headerRowIndex === -1) throw new Error('Could not find header row in Item Master file.');
+    if (headerRowIndex === -1) throw new Error('Could not find header row in Masteritems file.');
 
     const headers = rawData[headerRowIndex].map(h => String(h || '').trim());
     let dataStartIndex = -1;
@@ -329,7 +348,10 @@ function processItemMasterFile(workbook: any, sheetName: string, updateStatus: S
     const df_template: ExcelRow[] = dataRows.map(row => {
         const rowObject: ExcelRow = {};
         headers.forEach((header, index) => {
-            if (header) rowObject[header] = row[index];
+            if (header) {
+                const value = row[index];
+                rowObject[header] = typeof value === 'string' ? value.trim() : value;
+            }
         });
         return rowObject;
     });
@@ -372,28 +394,29 @@ function processItemMasterFile(workbook: any, sheetName: string, updateStatus: S
     });
 
     if (masteritemsData.length === 0) {
-        updateStatus({ message: 'No valid item data found in Item Master file, skipping CSV generation.', status: 'success' });
+        updateStatus({ message: 'No valid item data found in Masteritems file, skipping CSV generation.', status: 'success' });
         return [];
     }
 
     const dateStr = getTodayDateString();
     const csvs: CsvFile[] = [];
     csvs.push({ name: `masteritems_${dateStr}.csv`, content: arrayToCsv(masteritemsData, ['item_uid', 'name', 'manufacturer_uid', 'brand_uid', 'is_fractional', 'additional_1', 'additional_2', 'additional_3', 'additional_4', 'main_unit_uid', 'erp_category_uid']) });
-    if(barcodesData.length > 0) csvs.push({ name: `barcodes_${dateStr}.csv`, content: arrayToCsv(barcodesData, ['item_uid', 'barcode', 'is_main']) });
-    if(seenBrands.size > 0) csvs.push({ name: `brands_${dateStr}.csv`, content: arrayToCsv([...seenBrands].map(b => ({ brand_uid: b, name: b, is_deleted: 0 })), ['brand_uid', 'name', 'is_deleted']) });
-    if(dimensionsData.length > 0) csvs.push({ name: `dimensions_${dateStr}.csv`, content: arrayToCsv(dimensionsData, ['item_uid', 'unit_name', 'width', 'height', 'depth', 'netweight', 'volume', 'dimension_uid', 'coef', 'is_deleted']) });
-    if (seenErpCategories.size > 0) csvs.push({ name: `erpcategories_${dateStr}.csv`, content: arrayToCsv([...seenErpCategories.values()], ['erp_category_uid', 'name', 'parent_category_uid']) });
-    if(seenManufacturers.size > 0) csvs.push({ name: `manufacturers_${dateStr}.csv`, content: arrayToCsv([...seenManufacturers].map(m => ({ manufacturer_uid: m, name: m, is_deleted: 0 })), ['manufacturer_uid', 'name', 'is_deleted']) });
     
-    updateStatus({ message: 'Item Master processing complete.', status: 'success' });
+    if((options.barcodes ?? true) && barcodesData.length > 0) csvs.push({ name: `barcodes_${dateStr}.csv`, content: arrayToCsv(barcodesData, ['item_uid', 'barcode', 'is_main']) });
+    if((options.brands ?? true) && seenBrands.size > 0) csvs.push({ name: `brands_${dateStr}.csv`, content: arrayToCsv([...seenBrands].map(b => ({ brand_uid: b, name: b, is_deleted: 0 })), ['brand_uid', 'name', 'is_deleted']) });
+    if((options.dimensions ?? true) && dimensionsData.length > 0) csvs.push({ name: `dimensions_${dateStr}.csv`, content: arrayToCsv(dimensionsData, ['item_uid', 'unit_name', 'width', 'height', 'depth', 'netweight', 'volume', 'dimension_uid', 'coef', 'is_deleted']) });
+    if ((options.erpcategories ?? true) && seenErpCategories.size > 0) csvs.push({ name: `erpcategories_${dateStr}.csv`, content: arrayToCsv([...seenErpCategories.values()], ['erp_category_uid', 'name', 'parent_category_uid']) });
+    if((options.manufacturers ?? true) && seenManufacturers.size > 0) csvs.push({ name: `manufacturers_${dateStr}.csv`, content: arrayToCsv([...seenManufacturers].map(m => ({ manufacturer_uid: m, name: m, is_deleted: 0 })), ['manufacturer_uid', 'name', 'is_deleted']) });
+    
+    updateStatus({ message: 'Masteritems processing complete.', status: 'success' });
     return csvs;
 }
 
 /**
  * Processes the new, complex "Item Master" file format (V2).
  */
-function processItemMasterV2File(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback): CsvFile[] {
-    updateStatus({ message: `Processing new Item Master file from sheet "${sheetName}"...`, status: 'processing' });
+function processItemMasterV2File(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions): CsvFile[] {
+    updateStatus({ message: `Processing new Masteritems file from sheet "${sheetName}"...`, status: 'processing' });
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
 
@@ -407,7 +430,7 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
             break;
         }
     }
-    if (headerRowIndex === -1) throw new Error('Could not find header row in the new Item Master file.');
+    if (headerRowIndex === -1) throw new Error('Could not find header row in the new Masteritems file.');
     
     const headers = rawData[headerRowIndex].map(h => String(h || '').trim());
     const dataRows = rawData.slice(headerRowIndex + 1);
@@ -415,13 +438,16 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
     const df_template: ExcelRow[] = dataRows.map(row => {
         const rowObject: ExcelRow = {};
         headers.forEach((header, index) => {
-            if (header) rowObject[header] = row[index];
+            if (header) {
+                const value = row[index];
+                rowObject[header] = typeof value === 'string' ? value.trim() : value;
+            }
         });
         return rowObject;
     }).filter(row => row['UID*'] !== null && row['UID*'] !== undefined && String(row['UID*']).trim() !== '');
 
     if (df_template.length === 0) {
-        updateStatus({ message: 'No valid item data found in new Item Master file, skipping CSV generation.', status: 'success' });
+        updateStatus({ message: 'No valid item data found in new Masteritems file, skipping CSV generation.', status: 'success' });
         return [];
     }
 
@@ -463,8 +489,26 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
             }
         }
 
+        const brandUidValue = row['Brand UID'];
+        const brandNameValue = row['Brand'];
+        let effectiveBrandUid: string | number | null = null;
+        if (brandUidValue !== null && brandUidValue !== undefined && String(brandUidValue).trim() !== '') {
+            effectiveBrandUid = brandUidValue;
+        } else if (brandNameValue !== null && brandNameValue !== undefined && String(brandNameValue).trim() !== '') {
+            effectiveBrandUid = brandNameValue;
+        }
+
+        const manufUidValue = row['Manufacturer UID'];
+        const manufNameValue = row['Manufacturer'];
+        let effectiveManufUid: string | number | null = null;
+        if (manufUidValue !== null && manufUidValue !== undefined && String(manufUidValue).trim() !== '') {
+            effectiveManufUid = manufUidValue;
+        } else if (manufNameValue !== null && manufNameValue !== undefined && String(manufNameValue).trim() !== '') {
+            effectiveManufUid = manufNameValue;
+        }
+
         masteritemsData.push({
-            item_uid: item_uid, name: row['Product name*'], manufacturer_uid: row['Manufacturer UID'], brand_uid: row['Brand UID'],
+            item_uid: item_uid, name: row['Product name*'], manufacturer_uid: effectiveManufUid, brand_uid: effectiveBrandUid,
             is_fractional: parseInt(String(row['Is fractional?']), 10) || 0,
             main_unit_uid: main_unit_uid, is_deleted: parseInt(String(row['To delete']), 10) || 0,
             additional_1: parseFloat(String(row['Add 1']).replace(',', '.')) || null,
@@ -490,17 +534,23 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
 
         if (row['Barcode']) barcodesData.push({ item_uid: item_uid, barcode: row['Barcode'], is_main: 1 });
 
-        const brandUid = row['Brand UID'];
-        if (brandUid && !brandsMap.has(String(brandUid))) {
-            brandsMap.set(String(brandUid), { brand_uid: brandUid, name: row['Brand'], is_deleted: 0 });
+        if (effectiveBrandUid !== null) {
+            const key = String(effectiveBrandUid);
+            if (!brandsMap.has(key)) {
+                brandsMap.set(key, { 
+                    brand_uid: effectiveBrandUid, 
+                    name: brandNameValue || effectiveBrandUid, 
+                    is_deleted: 0 
+                });
+            }
         }
 
         if (row['Unit']) {
             dimensionsData.push({
                 item_uid: item_uid, unit_name: row['Unit'],
-                width: parseFloat(String(row['Width (cm, in)'] || '').replace(',', '.')) || null,
-                height: parseFloat(String(row['Height  (cm, in)'] || '').replace(',', '.')) || null,
-                depth: parseFloat(String(row['Depth  (cm, in)'] || '').replace(',', '.')) || null,
+                width: parseFloat((row['Width (cm, in)'] || '').toString().replace(',', '.')) || null,
+                height: parseFloat((row['Height (cm, in)'] || '').toString().replace(',', '.')) || null,
+                depth: parseFloat((row['Depth (cm, in)'] || '').toString().replace(',', '.')) || null,
                 coef: 1, is_deleted: 0, dimension_uid: main_unit_uid
             });
         }
@@ -515,20 +565,16 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
 
             let currentLevelEffectiveUid: string | number | null = null;
             
-            // Determine the effective UID: UID has priority over a non-empty name.
             if (currentUidValue !== null && currentUidValue !== undefined && String(currentUidValue).trim() !== '') {
                 currentLevelEffectiveUid = currentUidValue;
             } else if (currentNameValue !== null && currentNameValue !== undefined && String(currentNameValue).trim() !== '') {
                 currentLevelEffectiveUid = currentNameValue;
             }
 
-            // If we have a valid category for this level, process it.
             if (currentLevelEffectiveUid !== null) {
                 const key = String(currentLevelEffectiveUid);
                 const existingEntry = erpCategoriesMap.get(key);
                 
-                // Add a new entry if it doesn't exist.
-                // Or, update an existing entry if it's missing a name and this row provides one.
                 if (!existingEntry || (existingEntry.name === null && currentNameValue !== null)) {
                     erpCategoriesMap.set(key, {
                         erp_category_uid: currentLevelEffectiveUid,
@@ -536,15 +582,19 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
                         parent_category_uid: previousLevelEffectiveUid
                     });
                 }
-
-                // The current level's effective UID becomes the parent for the next level in this row's hierarchy.
                 previousLevelEffectiveUid = currentLevelEffectiveUid;
             }
         }
         
-        const manufUid = row['Manufacturer UID'];
-        if (manufUid && !manufacturersMap.has(String(manufUid))) {
-            manufacturersMap.set(String(manufUid), { manufacturer_uid: manufUid, name: row['Manufacturer'], is_deleted: 0 });
+        if (effectiveManufUid !== null) {
+            const key = String(effectiveManufUid);
+            if (!manufacturersMap.has(key)) {
+                manufacturersMap.set(key, {
+                    manufacturer_uid: effectiveManufUid,
+                    name: manufNameValue || effectiveManufUid,
+                    is_deleted: 0
+                });
+            }
         }
     });
 
@@ -554,13 +604,14 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
         'item_uid', 'name', 'manufacturer_uid', 'brand_uid', 'is_fractional', 'additional_1', 'additional_2', 'additional_3', 'additional_4', 'additional_5', 'additional_6', 'additional_7', 'additional_8', 'additional_9', 'additional_10', 'additional_11', 'additional_12', 'additional_13', 'additional_14', 'additional_15', 'additional_16', 'additional_17', 'additional_18', 'additional_19', 'additional_20', 'main_unit_uid', 'erp_category_uid', 'is_deleted'
     ];
     csvs.push({ name: `masteritems_${dateStr}.csv`, content: arrayToCsv(masteritemsData, masteritems_cols) });
-    if(barcodesData.length > 0) csvs.push({ name: `barcodes_${dateStr}.csv`, content: arrayToCsv(barcodesData, ['item_uid', 'barcode', 'is_main']) });
-    if(brandsMap.size > 0) csvs.push({ name: `brands_${dateStr}.csv`, content: arrayToCsv(Array.from(brandsMap.values()), ['brand_uid', 'name', 'is_deleted']) });
-    if(dimensionsData.length > 0) csvs.push({ name: `dimensions_${dateStr}.csv`, content: arrayToCsv(dimensionsData, ['item_uid', 'unit_name', 'width', 'height', 'depth', 'coef', 'is_deleted', 'dimension_uid']) });
-    if (erpCategoriesMap.size > 0) csvs.push({ name: `erpcategories_${dateStr}.csv`, content: arrayToCsv(Array.from(erpCategoriesMap.values()), ['erp_category_uid', 'name', 'parent_category_uid']) });
-    if(manufacturersMap.size > 0) csvs.push({ name: `manufacturers_${dateStr}.csv`, content: arrayToCsv(Array.from(manufacturersMap.values()), ['manufacturer_uid', 'name', 'is_deleted']) });
+
+    if((options.barcodes ?? true) && barcodesData.length > 0) csvs.push({ name: `barcodes_${dateStr}.csv`, content: arrayToCsv(barcodesData, ['item_uid', 'barcode', 'is_main']) });
+    if((options.brands ?? true) && brandsMap.size > 0) csvs.push({ name: `brands_${dateStr}.csv`, content: arrayToCsv(Array.from(brandsMap.values()), ['brand_uid', 'name', 'is_deleted']) });
+    if((options.dimensions ?? true) && dimensionsData.length > 0) csvs.push({ name: `dimensions_${dateStr}.csv`, content: arrayToCsv(dimensionsData, ['item_uid', 'unit_name', 'width', 'height', 'depth', 'coef', 'is_deleted', 'dimension_uid']) });
+    if ((options.erpcategories ?? true) && erpCategoriesMap.size > 0) csvs.push({ name: `erpcategories_${dateStr}.csv`, content: arrayToCsv(Array.from(erpCategoriesMap.values()), ['erp_category_uid', 'name', 'parent_category_uid']) });
+    if((options.manufacturers ?? true) && manufacturersMap.size > 0) csvs.push({ name: `manufacturers_${dateStr}.csv`, content: arrayToCsv(Array.from(manufacturersMap.values()), ['manufacturer_uid', 'name', 'is_deleted']) });
     
-    updateStatus({ message: 'New Item Master processing complete.', status: 'success' });
+    updateStatus({ message: 'New Masteritems processing complete.', status: 'success' });
     return csvs;
 }
 
@@ -568,12 +619,14 @@ function processItemMasterV2File(workbook: any, sheetName: string, updateStatus:
 
 export const generateCsvsFromExcel = async (
     file: File,
-    updateStatus: StatusUpdateCallback
+    updateStatus: StatusUpdateCallback,
+    options: CsvGenerationOptions = {}
 ): Promise<{ csvFiles: CsvFile[]; detectedType: FileType }> => {
     
     updateStatus({ message: 'Reading and analyzing Excel file...', status: 'processing' });
     const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data);
+    // Use `cellDates: true` to ensure the library parses dates into JS Date objects
+    const workbook = XLSX.read(data, { cellDates: true });
     
     const { type: detectedType, sheetName } = detectFileType(workbook);
     
@@ -588,13 +641,13 @@ export const generateCsvsFromExcel = async (
             csvFiles = processStoresFile(workbook, sheetName, updateStatus);
             break;
         case 'STORE_ITEMS':
-            csvFiles = processStoreItemsFile(workbook, sheetName, updateStatus);
+            csvFiles = processStoreItemsFile(workbook, sheetName, updateStatus, options);
             break;
         case 'ITEM_MASTER':
-            csvFiles = processItemMasterFile(workbook, sheetName, updateStatus);
+            csvFiles = processItemMasterFile(workbook, sheetName, updateStatus, options);
             break;
         case 'ITEM_MASTER_V2':
-            csvFiles = processItemMasterV2File(workbook, sheetName, updateStatus);
+            csvFiles = processItemMasterV2File(workbook, sheetName, updateStatus, options);
             break;
         case 'FACTS':
             csvFiles = processFactsFile(workbook, sheetName, updateStatus);

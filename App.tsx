@@ -1,8 +1,17 @@
 
+
 import React, { useState, useCallback, useRef } from 'react';
 import { FolderUp, Download, RefreshCw, AlertTriangle, CheckCircle, Loader2, FileCheck2, FileText, XCircle } from 'lucide-react';
 import { generateCsvsFromExcel } from './services/excelProcessor';
-import type { StatusUpdate, FileType, CsvFile } from './types';
+import type { StatusUpdate, FileType, CsvFile, CsvGenerationOptions } from './types';
+
+// Fix for non-standard directory attributes on input element
+declare module 'react' {
+    interface InputHTMLAttributes<T> {
+        webkitdirectory?: string;
+        directory?: string;
+    }
+}
 
 declare var JSZip: any;
 
@@ -19,6 +28,11 @@ interface LogEntry extends StatusUpdate {
     fileIndex: number;
 }
 
+const CsvOptionsConfig: Record<string, string[]> = {
+  ITEM_MASTER: ['barcodes', 'brands', 'dimensions', 'erpcategories', 'manufacturers'],
+  ITEM_MASTER_V2: ['barcodes', 'brands', 'dimensions', 'erpcategories', 'manufacturers'],
+  STORE_ITEMS: ['suppliers'],
+};
 
 const getTodayDateString = (): string => {
     const today = new Date();
@@ -36,6 +50,7 @@ const App: React.FC = () => {
     const [errorMessage, setErrorMessage] = useState<string>('');
     const [zipUrl, setZipUrl] = useState<string | null>(null);
     const [zipFileName, setZipFileName] = useState<string>('');
+    const [csvOptions, setCsvOptions] = useState<CsvGenerationOptions>({});
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const resetState = () => {
@@ -43,6 +58,7 @@ const App: React.FC = () => {
         setStatusUpdates([]);
         setErrorMessage('');
         setZipUrl(null);
+        setCsvOptions({});
         if (zipUrl) {
             URL.revokeObjectURL(zipUrl);
         }
@@ -72,10 +88,13 @@ const App: React.FC = () => {
         // Asynchronously detect file types
         const detectionPromises = validFiles.map(async (file, index) => {
             try {
+                // Pass empty callback and no options for detection phase
                 const { detectedType } = await generateCsvsFromExcel(file, () => {});
                 return { index, type: detectedType };
             } catch (error) {
-                return { index, type: 'UNKNOWN', error: error instanceof Error ? error.message : "Detection failed" };
+                // FIX: Use type assertion to prevent 'UNKNOWN' from being widened to `string`
+                // This resolves the "Type 'string' is not assignable to type 'FileType'" error.
+                return { index, type: 'UNKNOWN' as 'UNKNOWN', error: error instanceof Error ? error.message : "Detection failed" };
             }
         });
         
@@ -123,7 +142,7 @@ const App: React.FC = () => {
             };
 
             try {
-                const { csvFiles } = await generateCsvsFromExcel(info.file, updateCallback);
+                const { csvFiles } = await generateCsvsFromExcel(info.file, updateCallback, csvOptions);
                 csvFiles.forEach(csv => allGeneratedCsvs.push(csv));
                 hasProcessedAnyFile = true;
                 setFileInfos(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'success' } : f));
@@ -147,18 +166,25 @@ const App: React.FC = () => {
         setErrorMessage(localErrorMessages.trim());
 
         if (allGeneratedCsvs.length > 0) {
-            allGeneratedCsvs.forEach(csv => {
-                zip.file(csv.name, csv.content);
-            });
+            // FIX: Wrap zip generation in a try-catch block to handle potential errors.
+            try {
+                allGeneratedCsvs.forEach(csv => {
+                    zip.file(csv.name, csv.content);
+                });
 
-            const finalZipName = `${archiveName.trim() || 'data_export'}_${getTodayDateString()}.zip`;
-            const zipBlob = await zip.generateAsync({ type: 'blob' });
-            const url = URL.createObjectURL(zipBlob);
+                const finalZipName = `${archiveName.trim() || 'data_export'}_${getTodayDateString()}.zip`;
+                const zipBlob = await zip.generateAsync({ type: 'blob' });
+                const url = URL.createObjectURL(zipBlob);
 
-            setZipUrl(url);
-            setZipFileName(finalZipName);
-            setProcessingState('success');
-            setStatusUpdates(prev => [...prev, { message: 'All valid files processed and bundled into a ZIP archive.', status: 'success', fileIndex: -1 }]);
+                setZipUrl(url);
+                setZipFileName(finalZipName);
+                setProcessingState('success');
+                setStatusUpdates(prev => [...prev, { message: 'All valid files processed and bundled into a ZIP archive.', status: 'success', fileIndex: -1 }]);
+            } catch (zipError) {
+                const message = zipError instanceof Error ? zipError.message : 'An unknown error occurred while creating the ZIP file.';
+                setErrorMessage(prev => (prev ? `${prev}\n${message}` : message));
+                setProcessingState('error');
+            }
         } else if (hasProcessedAnyFile && !localErrorMessages) {
             setProcessingState('success');
             setStatusUpdates(prev => [...prev, { message: 'Processing complete. All valid files were processed but contained no data to export.', status: 'success', fileIndex: -1 }]);
@@ -169,7 +195,7 @@ const App: React.FC = () => {
             }
         }
 
-    }, [fileInfos, archiveName]);
+    }, [fileInfos, archiveName, csvOptions]);
 
     const handleReset = () => {
         setFileInfos([]);
@@ -177,6 +203,13 @@ const App: React.FC = () => {
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
         }
+    };
+
+    const handleCsvOptionChange = (option: string) => {
+        setCsvOptions(prev => ({
+            ...prev,
+            [option]: !(prev[option] ?? true),
+        }));
     };
     
     const StatusIcon = ({ status }: { status: 'processing' | 'success' | 'error' | 'pending' }) => {
@@ -190,14 +223,27 @@ const App: React.FC = () => {
 
     const formatFileTypeName = (typeName: FileType) => {
         if (typeName === 'UNKNOWN') return 'Unknown';
-        if (typeName === 'ITEM_MASTER_V2') return 'Item Master (New Format)';
+        if (typeName === 'ITEM_MASTER') return 'Masteritems';
+        if (typeName === 'ITEM_MASTER_V2') return 'Masteritems (New Format)';
         if (typeName === 'FACTS') return 'Facts Data';
         if (typeName === 'STORE_ITEMS') return 'Store Items';
         if (typeName === 'STORE') return 'Stores';
         return typeName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     };
 
+    const formatOptionName = (name: string) => {
+        if (name === 'erpcategories') return 'ERP Categories';
+        return name.charAt(0).toUpperCase() + name.slice(1);
+    };
+
     const hasValidFiles = fileInfos.some(f => f.type !== 'UNKNOWN' && f.status !== 'error');
+
+    const uniqueOptions = [...new Set(
+        fileInfos
+            .map(f => f.type)
+            .filter(t => t in CsvOptionsConfig)
+            .flatMap(t => CsvOptionsConfig[t as keyof typeof CsvOptionsConfig])
+    )];
 
     return (
         <div className="min-h-screen bg-gray-50 text-gray-800 flex items-center justify-center p-4 transition-colors duration-300">
@@ -241,6 +287,27 @@ const App: React.FC = () => {
                                     </div>
                                 ))}
                              </div>
+                        </div>
+                    )}
+                    
+                    {uniqueOptions.length > 0 && (
+                        <div className="space-y-3 pt-4 border-t border-gray-200">
+                            <h3 className="text-lg font-semibold">CSV Generation Options</h3>
+                            <p className="text-sm text-gray-500">Select which supplementary CSV files to generate.</p>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 pt-2">
+                                {uniqueOptions.map(option => (
+                                    <label key={option} className="flex items-center space-x-3 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={csvOptions[option] ?? true}
+                                            onChange={() => handleCsvOptionChange(option)}
+                                            disabled={processingState === 'processing'}
+                                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-focus transition disabled:opacity-50"
+                                        />
+                                        <span className="text-sm font-medium text-gray-700">{formatOptionName(option)}</span>
+                                    </label>
+                                ))}
+                            </div>
                         </div>
                     )}
 
