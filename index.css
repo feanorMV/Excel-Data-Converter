@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #4CAF50;
+  --color-primary-hover: #45a049;
+  --color-primary-focus: #66BB6A;
+  --color-secondary: #8BC34A;
+  --color-light: #f9fafb;
+  --color-dark: #111827;
+}
+
+@layer base {
+  body {
+    @apply bg-gray-50;
+  }
+}

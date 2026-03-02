@@ -1,19 +1,18 @@
 
 
 import React, { useState, useCallback, useRef } from 'react';
-import { FolderUp, Download, RefreshCw, AlertTriangle, CheckCircle, Loader2, FileCheck2, FileText, XCircle } from 'lucide-react';
+import { FolderUp, Download, RefreshCw, AlertTriangle, CheckCircle, Loader2, FileText, XCircle, Settings } from 'lucide-react';
+import JSZip from 'jszip';
 import { generateCsvsFromExcel } from './services/excelProcessor.ts';
 import type { StatusUpdate, FileType, CsvFile, CsvGenerationOptions } from './types.ts';
 
 // Fix for non-standard directory attributes on input element
 declare module 'react' {
-    interface InputHTMLAttributes<T> {
+    interface InputHTMLAttributes {
         webkitdirectory?: string;
         directory?: string;
     }
 }
-
-declare var JSZip: any;
 
 type ProcessingState = 'idle' | 'processing' | 'success' | 'error';
 interface FileInfo {
@@ -21,6 +20,7 @@ interface FileInfo {
     type: FileType;
     status: 'pending' | 'processing' | 'success' | 'error';
     error?: string;
+    headers: string[];
 }
 
 interface LogEntry extends StatusUpdate {
@@ -31,6 +31,7 @@ interface LogEntry extends StatusUpdate {
 const CsvOptionsConfig: Record<string, string[]> = {
   ITEM_MASTER: ['barcodes', 'brands', 'dimensions', 'erpcategories', 'manufacturers'],
   ITEM_MASTER_V2: ['barcodes', 'brands', 'dimensions', 'erpcategories', 'manufacturers'],
+  ITEM_MASTER_UPDATED: ['barcodes', 'brands', 'dimensions', 'erpcategories', 'manufacturers'],
   STORE_ITEMS: ['suppliers'],
 };
 
@@ -51,6 +52,8 @@ export const App: React.FC = () => {
     const [zipUrl, setZipUrl] = useState<string | null>(null);
     const [zipFileName, setZipFileName] = useState<string>('');
     const [csvOptions, setCsvOptions] = useState<CsvGenerationOptions>({});
+    const [isAdvancedOptionsOpen, setIsAdvancedOptionsOpen] = useState(false);
+    const [selectedColumns, setSelectedColumns] = useState<Record<string, boolean>>({});
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const resetState = () => {
@@ -81,38 +84,46 @@ export const App: React.FC = () => {
         const initialFileInfos: FileInfo[] = validFiles.map(file => ({
             file,
             type: 'UNKNOWN',
-            status: 'pending'
+            status: 'pending',
+            headers: []
         }));
         setFileInfos(initialFileInfos);
 
-        // Asynchronously detect file types
-        const detectionPromises = validFiles.map(async (file, index) => {
-            try {
-                // Pass empty callback and no options for detection phase
-                const { detectedType } = await generateCsvsFromExcel(file, () => {});
-                return { index, type: detectedType };
-            } catch (error) {
-                // FIX: Use type assertion to prevent 'UNKNOWN' from being widened to `string`
-                // This resolves the "Type 'string' is not assignable to type 'FileType'" error.
-                return { index, type: 'UNKNOWN' as 'UNKNOWN', error: error instanceof Error ? error.message : "Detection failed" };
-            }
-        });
-        
-        const results = await Promise.all(detectionPromises);
-        
-        setFileInfos(currentInfos => {
-            const newInfos = [...currentInfos];
-            results.forEach(result => {
-                if (result) {
-                    newInfos[result.index].type = result.type;
-                    if(result.error) {
-                       newInfos[result.index].status = 'error';
-                       newInfos[result.index].error = result.error;
-                    }
+        // Sequentially detect file types to prevent UI freezing
+        const detectFiles = async () => {
+            for (let i = 0; i < validFiles.length; i++) {
+                const file = validFiles[i];
+                
+                // Allow UI to breathe and update
+                await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+                
+                try {
+                    // Use isDetectionOnly: true to read only the first 50 rows
+                    const { detectedType, headers } = await generateCsvsFromExcel(file, () => {}, {}, null, true);
+                    setFileInfos(currentInfos => {
+                        const newInfos = [...currentInfos];
+                        newInfos[i] = {
+                            ...newInfos[i],
+                            type: detectedType,
+                            headers: headers || []
+                        };
+                        return newInfos;
+                    });
+                } catch (error) {
+                    setFileInfos(currentInfos => {
+                        const newInfos = [...currentInfos];
+                        newInfos[i] = {
+                            ...newInfos[i],
+                            status: 'error',
+                            error: error instanceof Error ? error.message : "Detection failed"
+                        };
+                        return newInfos;
+                    });
                 }
-            });
-            return newInfos;
-        });
+            }
+        };
+
+        detectFiles();
     };
 
     const handleProcess = useCallback(async () => {
@@ -142,7 +153,7 @@ export const App: React.FC = () => {
             };
 
             try {
-                const { csvFiles } = await generateCsvsFromExcel(info.file, updateCallback, csvOptions);
+                const { csvFiles } = await generateCsvsFromExcel(info.file, updateCallback, csvOptions, selectedColumns);
                 csvFiles.forEach(csv => allGeneratedCsvs.push(csv));
                 hasProcessedAnyFile = true;
                 setFileInfos(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'success' } : f));
@@ -268,7 +279,6 @@ export const App: React.FC = () => {
                                 onChange={(e) => handleFilesChange(e.target.files)}
                                 className="hidden"
                                 webkitdirectory=""
-                                directory=""
                             />
                         </div>
                     ) : (
@@ -356,6 +366,13 @@ export const App: React.FC = () => {
                         >
                            <RefreshCw className="mr-3 h-5 w-5"/> Reset
                         </button>
+
+                        <button
+                            onClick={() => setIsAdvancedOptionsOpen(true)}
+                            className="w-full sm:w-auto inline-flex justify-center items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-focus transition-all duration-300"
+                        >
+                           <Settings className="mr-3 h-5 w-5"/> Advanced Options
+                        </button>
                     </div>
 
                     {(statusUpdates.length > 0) && (
@@ -391,6 +408,41 @@ export const App: React.FC = () => {
                     </p>
                 </footer>
             </div>
+
+            {isAdvancedOptionsOpen && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full">
+                        <h2 className="text-2xl font-bold mb-4">Advanced Options</h2>
+                        <div className="space-y-4">
+                            <div>
+                                <h3 className="text-lg font-semibold">Column Filtering</h3>
+                                <p className="text-sm text-gray-500">Select which columns to include in the output.</p>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 pt-2 max-h-60 overflow-y-auto">
+                                    {[...new Set(fileInfos.flatMap(f => f.headers))].map(header => (
+                                        <label key={header} className="flex items-center space-x-3 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedColumns[header] ?? true}
+                                                onChange={() => setSelectedColumns(prev => ({ ...prev, [header]: !(prev[header] ?? true) }))}
+                                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-focus transition"
+                                            />
+                                            <span className="text-sm font-medium text-gray-700">{header}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="mt-6 flex justify-end">
+                            <button 
+                                onClick={() => setIsAdvancedOptionsOpen(false)} 
+                                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors duration-300"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

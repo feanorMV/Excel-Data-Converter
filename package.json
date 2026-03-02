@@ -5,18 +5,29 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "react-dom": "19.0.0-rc.0",
+    "jszip": "^3.10.1",
+    "lucide-react": "0.417.0",
     "react": "19.0.0-rc.0",
-    "lucide-react": "0.417.0"
+    "react-dom": "19.0.0-rc.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.2.1",
     "@types/node": "^22.14.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
     "@vitejs/plugin-react": "^5.0.0",
+    "eslint": "^9.39.3",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^17.4.0",
+    "tailwindcss": "^4.2.1",
     "typescript": "~5.8.2",
+    "typescript-eslint": "^8.56.1",
     "vite": "^6.2.0"
   }
 }
