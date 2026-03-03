@@ -91,10 +91,9 @@ const detectFileType = (workbook: any): { type: FileType; sheetName: string | nu
         const sheet = workbook.Sheets[sheetName];
         if (!sheet) continue;
         
-        // Read first 50 rows once per sheet
-        const jsonData: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, range: 0 + (workbook.Sheets[sheetName]['!ref'] ? ":" + workbook.Sheets[sheetName]['!ref'].split(':')[1].replace(/\d+$/, '50') : '') });
-        // Actually, sheet_to_json with header:1 is fast, but let's just use the built-in way to limit rows if possible, 
-        // but since we already used sheetRows in XLSX.read, jsonData will already be limited.
+        // Read rows for detection. Since we use sheetRows: 50 in XLSX.read for detection, 
+        // jsonData will already be limited to 50 rows if isDetectionOnly was true.
+        const jsonData: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
         sheetDataCache.set(sheetName, jsonData);
     }
 
