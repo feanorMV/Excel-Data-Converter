@@ -935,10 +935,10 @@ export const generateCsvsFromExcel = async (
         updateStatus({ message: 'Reading and analyzing Excel file...', status: 'processing' });
     }
     const data = await file.arrayBuffer();
-    // Optimization: Use sheetRows to read only the beginning of the file during detection
-    const readOptions: any = { cellDates: true, dense: true };
+    // Use standard reading options without 'dense' mode which can sometimes cause issues with sheet_to_json
+    const readOptions: any = { cellDates: true };
     if (isDetectionOnly) {
-        readOptions.sheetRows = 50;
+        readOptions.sheetRows = 100; // Read a bit more for safer detection
     }
     const workbook = XLSX.read(data, readOptions);
     await yieldToUI();
