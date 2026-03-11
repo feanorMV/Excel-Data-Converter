@@ -21,6 +21,7 @@ interface FileInfo {
     status: 'pending' | 'processing' | 'success' | 'error';
     error?: string;
     headers: string[];
+    progress?: number;
 }
 
 interface LogEntry extends StatusUpdate {
@@ -55,6 +56,7 @@ export const App: React.FC = () => {
     const [isAdvancedOptionsOpen, setIsAdvancedOptionsOpen] = useState(false);
     const [selectedColumns, setSelectedColumns] = useState<Record<string, boolean>>({});
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
 
     const resetState = () => {
         setProcessingState('idle');
@@ -64,6 +66,10 @@ export const App: React.FC = () => {
         setCsvOptions({});
         if (zipUrl) {
             URL.revokeObjectURL(zipUrl);
+        }
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
         }
     };
 
@@ -126,6 +132,12 @@ export const App: React.FC = () => {
         detectFiles();
     };
 
+    const handleCancel = useCallback(() => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+        }
+    }, []);
+
     const handleProcess = useCallback(async () => {
         if (fileInfos.length === 0) return;
 
@@ -133,6 +145,8 @@ export const App: React.FC = () => {
         setStatusUpdates([]);
         setErrorMessage('');
         setZipUrl(null);
+        
+        abortControllerRef.current = new AbortController();
         
         const zip = new JSZip();
         const allGeneratedCsvs: CsvFile[] = [];
@@ -150,20 +164,28 @@ export const App: React.FC = () => {
             
             const updateCallback = (update: StatusUpdate) => {
                 setStatusUpdates(prev => [...prev, { ...update, message: `[${info.file.name}] ${update.message}`, fileIndex: i }]);
+                if (update.progress !== undefined) {
+                    setFileInfos(prev => prev.map((f, idx) => idx === i ? { ...f, progress: update.progress } : f));
+                }
             };
 
             try {
-                const { csvFiles } = await generateCsvsFromExcel(info.file, updateCallback, csvOptions, selectedColumns);
+                const { csvFiles } = await generateCsvsFromExcel(info.file, updateCallback, csvOptions, selectedColumns, false, abortControllerRef.current.signal);
                 csvFiles.forEach(csv => allGeneratedCsvs.push(csv));
                 hasProcessedAnyFile = true;
-                setFileInfos(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'success' } : f));
+                setFileInfos(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'success', progress: 100 } : f));
                  // Update all 'processing' logs for this file to 'success'
                 setStatusUpdates(prev => prev.map(log =>
-                    (log.fileIndex === i && log.status === 'processing') ? { ...log, status: 'success' } : log
+                    (log.fileIndex === i && log.status === 'processing') ? { ...log, status: 'success', progress: 100 } : log
                 ));
 
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'An unknown error occurred.';
+                if (message === 'Processing cancelled by user') {
+                    setStatusUpdates(prev => [...prev, { message: `Processing cancelled for ${info.file.name}`, status: 'error', fileIndex: i }]);
+                    setFileInfos(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'error', error: 'Cancelled' } : f));
+                    break;
+                }
                 localErrorMessages += `Error in ${info.file.name}: ${message}\n`;
                 setStatusUpdates(prev => [...prev, { message: `Failed to process ${info.file.name}: ${message}`, status: 'error', fileIndex: i }]);
                 setFileInfos(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'error', error: message } : f));
@@ -175,6 +197,12 @@ export const App: React.FC = () => {
         }
         
         setErrorMessage(localErrorMessages.trim());
+
+        if (abortControllerRef.current?.signal.aborted) {
+            setProcessingState('error');
+            setErrorMessage(prev => prev ? `${prev}\nProcessing was cancelled.` : 'Processing was cancelled.');
+            return;
+        }
 
         if (allGeneratedCsvs.length > 0) {
             // FIX: Wrap zip generation in a try-catch block to handle potential errors.
@@ -256,13 +284,32 @@ export const App: React.FC = () => {
             .flatMap(t => CsvOptionsConfig[t as keyof typeof CsvOptionsConfig])
     )];
 
+    const masterProgress = fileInfos.length > 0 
+        ? Math.round(fileInfos.reduce((acc, curr) => acc + (curr.progress || (curr.status === 'success' ? 100 : 0)), 0) / fileInfos.length)
+        : 0;
+
     return (
         <div className="min-h-screen bg-gray-50 text-gray-800 flex items-center justify-center p-4 transition-colors duration-300">
             <div className="w-full max-w-3xl mx-auto">
-                <header className="text-center mb-8">
-                    <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary">Excel Data Converter</h1>
-                    <p className="mt-3 text-lg text-gray-600">Select a folder to convert all valid template files into a structured CSV archive.</p>
-                </header>
+                    <header className="text-center mb-8">
+                        <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary">Excel Data Converter</h1>
+                        <p className="mt-3 text-lg text-gray-600">Select a folder to convert all valid template files into a structured CSV archive.</p>
+                        
+                        {processingState === 'processing' && (
+                            <div className="mt-6 max-w-md mx-auto">
+                                <div className="flex justify-between mb-1 text-sm font-medium text-primary">
+                                    <span>Overall Progress</span>
+                                    <span>{masterProgress}%</span>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                                    <div 
+                                        className="bg-primary h-2.5 rounded-full transition-all duration-300 ease-out" 
+                                        style={{ width: `${masterProgress}%` }}
+                                    ></div>
+                                </div>
+                            </div>
+                        )}
+                    </header>
 
                 <main className="bg-white rounded-2xl shadow-2xl p-6 md:p-8 space-y-6">
                     {fileInfos.length === 0 ? (
@@ -286,14 +333,27 @@ export const App: React.FC = () => {
                              <h3 className="text-lg font-semibold border-b border-gray-200 pb-2">Detected Files:</h3>
                              <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
                                 {fileInfos.map((info, index) => (
-                                    <div key={index} className={`flex items-center p-2 rounded-md ${info.status === 'error' ? 'bg-red-50' : 'bg-gray-100'}`}>
-                                        <StatusIcon status={info.status} />
-                                        <div className="flex-grow">
-                                            <p className="font-medium text-sm">{info.file.name}</p>
-                                            <p className={`text-xs ${info.status === 'error' ? 'text-red-600' : 'text-gray-500'}`}>
-                                               {info.status === 'error' ? info.error : `Type: ${formatFileTypeName(info.type)}`}
-                                            </p>
+                                    <div key={index} className={`flex flex-col p-3 rounded-md ${info.status === 'error' ? 'bg-red-50' : 'bg-gray-100'}`}>
+                                        <div className="flex items-center">
+                                            <StatusIcon status={info.status} />
+                                            <div className="flex-grow">
+                                                <p className="font-medium text-sm">{info.file.name}</p>
+                                                <p className={`text-xs ${info.status === 'error' ? 'text-red-600' : 'text-gray-500'}`}>
+                                                   {info.status === 'error' ? info.error : `Type: ${formatFileTypeName(info.type)}`}
+                                                </p>
+                                            </div>
+                                            {info.status === 'processing' && info.progress !== undefined && (
+                                                <span className="text-xs font-bold text-primary ml-2">{info.progress}%</span>
+                                            )}
                                         </div>
+                                        {info.status === 'processing' && info.progress !== undefined && (
+                                            <div className="mt-2 w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                                                <div 
+                                                    className="bg-primary h-1.5 rounded-full transition-all duration-300 ease-out" 
+                                                    style={{ width: `${info.progress}%` }}
+                                                ></div>
+                                            </div>
+                                        )}
                                     </div>
                                 ))}
                              </div>
@@ -351,14 +411,24 @@ export const App: React.FC = () => {
                     )}
 
                     <div className="flex flex-col sm:flex-row gap-4">
-                        <button
-                            onClick={handleProcess}
-                            disabled={!hasValidFiles || processingState === 'processing'}
-                            className="w-full inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-primary hover:bg-primary-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-focus disabled:bg-gray-400 disabled:cursor-not-allowed transition-all duration-300"
-                        >
-                            {processingState === 'processing' ? <Loader2 className="animate-spin -ml-1 mr-3 h-5 w-5"/> : <CheckCircle className="-ml-1 mr-3 h-5 w-5" />}
-                            {processingState === 'processing' ? 'Processing...' : 'Start Processing'}
-                        </button>
+                        {processingState === 'processing' ? (
+                            <button
+                                onClick={handleCancel}
+                                className="w-full inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-all duration-300"
+                            >
+                                <XCircle className="-ml-1 mr-3 h-5 w-5" />
+                                Cancel Processing
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleProcess}
+                                disabled={!hasValidFiles}
+                                className="w-full inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-primary hover:bg-primary-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-focus disabled:bg-gray-400 disabled:cursor-not-allowed transition-all duration-300"
+                            >
+                                <CheckCircle className="-ml-1 mr-3 h-5 w-5" />
+                                Start Processing
+                            </button>
+                        )}
 
                         <button
                             onClick={handleReset}

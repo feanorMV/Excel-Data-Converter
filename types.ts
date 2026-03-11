@@ -3,6 +3,7 @@ export type FileType = 'ITEM_MASTER' | 'ITEM_MASTER_V2' | 'ITEM_MASTER_UPDATED' 
 export interface StatusUpdate {
     message: string;
     status: 'processing' | 'success' | 'error';
+    progress?: number; // 0 to 100
 }
 
 export type StatusUpdateCallback = (update: StatusUpdate) => void;
