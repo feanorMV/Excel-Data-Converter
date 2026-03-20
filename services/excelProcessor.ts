@@ -14,11 +14,17 @@ function getTodayDateString(): string {
     return `${year}${month}${day}`;
 }
 
-async function arrayToCsv(data: Record<string, any>[], columns: string[], selectedColumns: Record<string, boolean> | null = null, onProgress?: (progress: number) => void, signal?: AbortSignal): Promise<string> {
+async function arrayToCsv(data: Record<string, any>[], columns: string[], selectedColumns: Record<string, boolean> | null = null, onProgress?: (progress: number) => void, signal?: AbortSignal, delimiter: string = ',', columnMapping: Record<string, string> = {}): Promise<string> {
     const finalColumns = selectedColumns ? columns.filter(col => selectedColumns[col] ?? true) : columns;
     if (finalColumns.length === 0) return '';
 
-    const header = finalColumns.join(',') + '\n';
+    const header = finalColumns.map(col => {
+        const mappedCol = columnMapping[col] || col;
+        if (mappedCol.includes('"') || mappedCol.includes(delimiter)) {
+            return `"${mappedCol.replace(/"/g, '""')}"`;
+        }
+        return mappedCol;
+    }).join(delimiter) + '\n';
     let rows = '';
     
     for (let i = 0; i < data.length; i++) {
@@ -30,11 +36,11 @@ async function arrayToCsv(data: Record<string, any>[], columns: string[], select
                 return '';
             }
             value = String(value);
-            if (value.includes('"') || value.includes(',')) {
+            if (value.includes('"') || value.includes(delimiter)) {
                 return `"${value.replace(/"/g, '""')}"`;
             }
             return value;
-        }).join(',');
+        }).join(delimiter);
         
         rows += rowContent + '\n';
         
@@ -135,7 +141,7 @@ const detectFileType = (workbook: any): { type: FileType; sheetName: string | nu
 /**
  * Processes a "Stores" file.
  */
-async function processStoresFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, selectedColumns: Record<string, boolean> | null, signal?: AbortSignal): Promise<CsvFile[]> {
+async function processStoresFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, signal?: AbortSignal): Promise<CsvFile[]> {
     updateStatus({ message: `Processing Stores file from sheet "${sheetName}"...`, status: 'processing' });
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
@@ -197,11 +203,15 @@ async function processStoresFile(workbook: any, sheetName: string, updateStatus:
     const dateStr = getTodayDateString();
     const csvs: CsvFile[] = [{
         name: `stores_${dateStr}.csv`,
+        rowCount: filteredStoresData.length,
         content: await arrayToCsv(
             filteredStoresData, 
             ['store_uid', 'name', 'region', 'group_name', 'floor_space', 'in_shelf', 'licence_start_date', 'is_deleted'], 
             selectedColumns,
-            (p) => updateStatus({ message: 'Generating CSV...', status: 'processing', progress: 50 + Math.round(p / 2) })
+            (p) => updateStatus({ message: 'Generating CSV...', status: 'processing', progress: 50 + Math.round(p / 2) }),
+            signal,
+            options.delimiter,
+            options.columnMapping
         )
     }];
 
@@ -288,22 +298,30 @@ async function processStoreItemsFile(workbook: any, sheetName: string, updateSta
 
     csvs.push({
         name: `items_${dateStr}.csv`,
+        rowCount: itemsData.length,
         content: await arrayToCsv(
             itemsData, 
             ['item_uid', 'store_uid', 'is_active_planogram', 'purchase_price', 'retail_price', 'external_supplier_uid'], 
             selectedColumns,
-            (p) => updateStatus({ message: 'Generating Items CSV...', status: 'processing', progress: 50 + Math.round(p / 4) })
+            (p) => updateStatus({ message: 'Generating Items CSV...', status: 'processing', progress: 50 + Math.round(p / 4) }),
+            signal,
+            options.delimiter,
+            options.columnMapping
         )
     });
 
     if ((options.suppliers ?? true) && suppliersMap.size > 0) {
         csvs.push({
             name: `suppliers_${dateStr}.csv`,
+            rowCount: suppliersMap.size,
             content: await arrayToCsv(
                 Array.from(suppliersMap.values()), 
                 ['supplier_uid', 'name', 'is_deleted'], 
                 selectedColumns,
-                (p) => updateStatus({ message: 'Generating Suppliers CSV...', status: 'processing', progress: 75 + Math.round(p / 4) })
+                (p) => updateStatus({ message: 'Generating Suppliers CSV...', status: 'processing', progress: 75 + Math.round(p / 4) }),
+                signal,
+                options.delimiter,
+                options.columnMapping
             )
         });
     }
@@ -315,7 +333,7 @@ async function processStoreItemsFile(workbook: any, sheetName: string, updateSta
 /**
  * Processes a "Facts" file containing sales and stock data.
  */
-async function processFactsFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, selectedColumns: Record<string, boolean> | null, signal?: AbortSignal): Promise<CsvFile[]> {
+async function processFactsFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, signal?: AbortSignal): Promise<CsvFile[]> {
     updateStatus({ message: `Processing Facts file from sheet "${sheetName}"...`, status: 'processing' });
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
@@ -397,11 +415,15 @@ async function processFactsFile(workbook: any, sheetName: string, updateStatus: 
     const dateStr = getTodayDateString();
     const csvs: CsvFile[] = [{
         name: `facts_${dateStr}.csv`,
+        rowCount: filteredFactsData.length,
         content: await arrayToCsv(
             filteredFactsData, 
             ["item_uid", "store_uid", "date", "stock", "sold_qty", "revenue", "cogs"], 
             selectedColumns,
-            (p) => updateStatus({ message: 'Generating Facts CSV...', status: 'processing', progress: 50 + Math.round(p / 2) })
+            (p) => updateStatus({ message: 'Generating Facts CSV...', status: 'processing', progress: 50 + Math.round(p / 2) }),
+            signal,
+            options.delimiter,
+            options.columnMapping
         )
     }];
     
@@ -513,19 +535,23 @@ async function processItemMasterFile(workbook: any, sheetName: string, updateSta
     const csvs: CsvFile[] = [];
     csvs.push({ 
         name: `masteritems_${dateStr}.csv`, 
+        rowCount: masteritemsData.length,
         content: await arrayToCsv(
             masteritemsData, 
             ['item_uid', 'name', 'manufacturer_uid', 'brand_uid', 'is_fractional', 'additional_1', 'additional_2', 'additional_3', 'additional_4', 'main_unit_uid', 'erp_category_uid'], 
             selectedColumns,
-            (p) => updateStatus({ message: 'Generating Masteritems CSV...', status: 'processing', progress: 50 + Math.round(p / 10) })
+            (p) => updateStatus({ message: 'Generating Masteritems CSV...', status: 'processing', progress: 50 + Math.round(p / 10) }),
+            signal,
+            options.delimiter,
+            options.columnMapping
         ) 
     });
     
-    if((options.barcodes ?? true) && barcodesData.length > 0) csvs.push({ name: `barcodes_${dateStr}.csv`, content: await arrayToCsv(barcodesData, ['item_uid', 'barcode', 'is_main'], null, (p) => updateStatus({ message: 'Generating Barcodes CSV...', status: 'processing', progress: 60 + Math.round(p / 10) })) });
-    if((options.brands ?? true) && seenBrands.size > 0) csvs.push({ name: `brands_${dateStr}.csv`, content: await arrayToCsv([...seenBrands].map(b => ({ brand_uid: b, name: b, is_deleted: 0 })), ['brand_uid', 'name', 'is_deleted'], selectedColumns, (p) => updateStatus({ message: 'Generating Brands CSV...', status: 'processing', progress: 70 + Math.round(p / 10) })) });
-    if((options.dimensions ?? true) && dimensionsData.length > 0) csvs.push({ name: `dimensions_${dateStr}.csv`, content: await arrayToCsv(dimensionsData, ['item_uid', 'unit_name', 'width', 'height', 'depth', 'netweight', 'volume', 'dimension_uid', 'coef', 'is_deleted'], selectedColumns, (p) => updateStatus({ message: 'Generating Dimensions CSV...', status: 'processing', progress: 80 + Math.round(p / 10) })) });
-    if ((options.erpcategories ?? true) && seenErpCategories.size > 0) csvs.push({ name: `erpcategories_${dateStr}.csv`, content: await arrayToCsv([...seenErpCategories.values()], ['erp_category_uid', 'name', 'parent_category_uid'], selectedColumns, (p) => updateStatus({ message: 'Generating ERP Categories CSV...', status: 'processing', progress: 90 + Math.round(p / 5) })) });
-    if((options.manufacturers ?? true) && seenManufacturers.size > 0) csvs.push({ name: `manufacturers_${dateStr}.csv`, content: await arrayToCsv([...seenManufacturers].map(m => ({ manufacturer_uid: m, name: m, is_deleted: 0 })), ['manufacturer_uid', 'name', 'is_deleted'], selectedColumns, (p) => updateStatus({ message: 'Generating Manufacturers CSV...', status: 'processing', progress: 95 + Math.round(p / 5) })) });
+    if((options.barcodes ?? true) && barcodesData.length > 0) csvs.push({ name: `barcodes_${dateStr}.csv`, rowCount: barcodesData.length, content: await arrayToCsv(barcodesData, ['item_uid', 'barcode', 'is_main'], null, (p) => updateStatus({ message: 'Generating Barcodes CSV...', status: 'processing', progress: 60 + Math.round(p / 10) }), signal, options.delimiter, options.columnMapping) });
+    if((options.brands ?? true) && seenBrands.size > 0) csvs.push({ name: `brands_${dateStr}.csv`, rowCount: seenBrands.size, content: await arrayToCsv([...seenBrands].map(b => ({ brand_uid: b, name: b, is_deleted: 0 })), ['brand_uid', 'name', 'is_deleted'], selectedColumns, (p) => updateStatus({ message: 'Generating Brands CSV...', status: 'processing', progress: 70 + Math.round(p / 10) }), signal, options.delimiter, options.columnMapping) });
+    if((options.dimensions ?? true) && dimensionsData.length > 0) csvs.push({ name: `dimensions_${dateStr}.csv`, rowCount: dimensionsData.length, content: await arrayToCsv(dimensionsData, ['item_uid', 'unit_name', 'width', 'height', 'depth', 'netweight', 'volume', 'dimension_uid', 'coef', 'is_deleted'], selectedColumns, (p) => updateStatus({ message: 'Generating Dimensions CSV...', status: 'processing', progress: 80 + Math.round(p / 10) }), signal, options.delimiter, options.columnMapping) });
+    if ((options.erpcategories ?? true) && seenErpCategories.size > 0) csvs.push({ name: `erpcategories_${dateStr}.csv`, rowCount: seenErpCategories.size, content: await arrayToCsv([...seenErpCategories.values()], ['erp_category_uid', 'name', 'parent_category_uid'], selectedColumns, (p) => updateStatus({ message: 'Generating ERP Categories CSV...', status: 'processing', progress: 90 + Math.round(p / 5) }), signal, options.delimiter, options.columnMapping) });
+    if((options.manufacturers ?? true) && seenManufacturers.size > 0) csvs.push({ name: `manufacturers_${dateStr}.csv`, rowCount: seenManufacturers.size, content: await arrayToCsv([...seenManufacturers].map(m => ({ manufacturer_uid: m, name: m, is_deleted: 0 })), ['manufacturer_uid', 'name', 'is_deleted'], selectedColumns, (p) => updateStatus({ message: 'Generating Manufacturers CSV...', status: 'processing', progress: 95 + Math.round(p / 5) }), signal, options.delimiter, options.columnMapping) });
     
     updateStatus({ message: 'Masteritems processing complete.', status: 'success', progress: 100 });
     return csvs;
@@ -734,13 +760,13 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
     const masteritems_cols = [
         'item_uid', 'name', 'manufacturer_uid', 'brand_uid', 'is_fractional', 'additional_1', 'additional_2', 'additional_3', 'additional_4', 'additional_5', 'additional_6', 'additional_7', 'additional_8', 'additional_9', 'additional_10', 'additional_11', 'additional_12', 'additional_13', 'additional_14', 'additional_15', 'additional_16', 'additional_17', 'additional_18', 'additional_19', 'additional_20', 'main_unit_uid', 'erp_category_uid', 'is_deleted'
     ];
-    csvs.push({ name: `masteritems_${dateStr}.csv`, content: await arrayToCsv(masteritemsData, masteritems_cols, selectedColumns) });
+    csvs.push({ name: `masteritems_${dateStr}.csv`, rowCount: masteritemsData.length, content: await arrayToCsv(masteritemsData, masteritems_cols, selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
 
-    if((options.barcodes ?? true) && barcodesData.length > 0) csvs.push({ name: `barcodes_${dateStr}.csv`, content: await arrayToCsv(barcodesData, ['item_uid', 'barcode', 'is_main']) });
-    if((options.brands ?? true) && brandsMap.size > 0) csvs.push({ name: `brands_${dateStr}.csv`, content: await arrayToCsv(Array.from(brandsMap.values()), ['brand_uid', 'name', 'is_deleted'], selectedColumns) });
-    if((options.dimensions ?? true) && dimensionsData.length > 0) csvs.push({ name: `dimensions_${dateStr}.csv`, content: await arrayToCsv(dimensionsData, ['item_uid', 'unit_name', 'width', 'height', 'depth', 'coef', 'is_deleted', 'dimension_uid'], selectedColumns) });
-    if ((options.erpcategories ?? true) && erpCategoriesMap.size > 0) csvs.push({ name: `erpcategories_${dateStr}.csv`, content: await arrayToCsv(Array.from(erpCategoriesMap.values()), ['erp_category_uid', 'name', 'parent_category_uid'], selectedColumns) });
-    if((options.manufacturers ?? true) && manufacturersMap.size > 0) csvs.push({ name: `manufacturers_${dateStr}.csv`, content: await arrayToCsv(Array.from(manufacturersMap.values()), ['manufacturer_uid', 'name', 'is_deleted'], selectedColumns) });
+    if((options.barcodes ?? true) && barcodesData.length > 0) csvs.push({ name: `barcodes_${dateStr}.csv`, rowCount: barcodesData.length, content: await arrayToCsv(barcodesData, ['item_uid', 'barcode', 'is_main'], null, undefined, signal, options.delimiter, options.columnMapping) });
+    if((options.brands ?? true) && brandsMap.size > 0) csvs.push({ name: `brands_${dateStr}.csv`, rowCount: brandsMap.size, content: await arrayToCsv(Array.from(brandsMap.values()), ['brand_uid', 'name', 'is_deleted'], selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
+    if((options.dimensions ?? true) && dimensionsData.length > 0) csvs.push({ name: `dimensions_${dateStr}.csv`, rowCount: dimensionsData.length, content: await arrayToCsv(dimensionsData, ['item_uid', 'unit_name', 'width', 'height', 'depth', 'coef', 'is_deleted', 'dimension_uid'], selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
+    if ((options.erpcategories ?? true) && erpCategoriesMap.size > 0) csvs.push({ name: `erpcategories_${dateStr}.csv`, rowCount: erpCategoriesMap.size, content: await arrayToCsv(Array.from(erpCategoriesMap.values()), ['erp_category_uid', 'name', 'parent_category_uid'], selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
+    if((options.manufacturers ?? true) && manufacturersMap.size > 0) csvs.push({ name: `manufacturers_${dateStr}.csv`, rowCount: manufacturersMap.size, content: await arrayToCsv(Array.from(manufacturersMap.values()), ['manufacturer_uid', 'name', 'is_deleted'], selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
     
     updateStatus({ message: 'New Masteritems processing complete.', status: 'success' });
     return csvs;
@@ -855,7 +881,7 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
 
     const dateStr = getTodayDateString();
     const csvs: CsvFile[] = [];
-    csvs.push({ name: `masteritems_${dateStr}.csv`, content: arrayToCsv(df_masteritems, column_order, selectedColumns) });
+    csvs.push({ name: `masteritems_${dateStr}.csv`, rowCount: df_masteritems.length, content: await arrayToCsv(df_masteritems, column_order, selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
     updateStatus({ message: 'Masteritems processed.', status: 'success' });
 
     // 2. Barcodes CSV
@@ -875,7 +901,7 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
             if (i % 1000 === 0) await yieldToUI();
         }
         if (df_barcodes.length > 0) {
-            csvs.push({ name: `barcodes_${dateStr}.csv`, content: await arrayToCsv(df_barcodes, ['item_uid', 'barcode', 'is_main'], selectedColumns) });
+            csvs.push({ name: `barcodes_${dateStr}.csv`, rowCount: df_barcodes.length, content: await arrayToCsv(df_barcodes, ['item_uid', 'barcode', 'is_main'], selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
         }
         updateStatus({ message: 'Barcodes processed.', status: 'success' });
     }
@@ -896,7 +922,7 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
             is_deleted: 0
         }));
         if (df_brands.length > 0) {
-            csvs.push({ name: `brands_${dateStr}.csv`, content: await arrayToCsv(df_brands, ['brand_uid', 'name', 'is_deleted'], selectedColumns) });
+            csvs.push({ name: `brands_${dateStr}.csv`, rowCount: df_brands.length, content: await arrayToCsv(df_brands, ['brand_uid', 'name', 'is_deleted'], selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
         }
         updateStatus({ message: 'Brands processed.', status: 'success' });
     }
@@ -932,7 +958,7 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
             if (i % 1000 === 0) await yieldToUI();
         }
         if (df_dimensions.length > 0) {
-            csvs.push({ name: `dimensions_${dateStr}.csv`, content: await arrayToCsv(df_dimensions, ['item_uid', 'unit_name', 'width', 'height', 'depth', 'netweight', 'volume', 'dimension_uid', 'coef', 'is_deleted'], selectedColumns) });
+            csvs.push({ name: `dimensions_${dateStr}.csv`, rowCount: df_dimensions.length, content: await arrayToCsv(df_dimensions, ['item_uid', 'unit_name', 'width', 'height', 'depth', 'netweight', 'volume', 'dimension_uid', 'coef', 'is_deleted'], selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
         }
         updateStatus({ message: 'Dimensions processed.', status: 'success' });
     }
@@ -973,7 +999,7 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
         }
 
         if (erp_category_list.length > 0) {
-            csvs.push({ name: `erpcategories_${dateStr}.csv`, content: await arrayToCsv(erp_category_list, ['erp_category_uid', 'name', 'parent_category_uid'], selectedColumns) });
+            csvs.push({ name: `erpcategories_${dateStr}.csv`, rowCount: erp_category_list.length, content: await arrayToCsv(erp_category_list, ['erp_category_uid', 'name', 'parent_category_uid'], selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
         }
         updateStatus({ message: 'ERP Categories processed.', status: 'success' });
     }
@@ -994,7 +1020,7 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
             is_deleted: 0
         }));
         if (df_manufacturers.length > 0) {
-            csvs.push({ name: `manufacturers_${dateStr}.csv`, content: await arrayToCsv(df_manufacturers, ['manufacturer_uid', 'name', 'is_deleted'], selectedColumns) });
+            csvs.push({ name: `manufacturers_${dateStr}.csv`, rowCount: df_manufacturers.length, content: await arrayToCsv(df_manufacturers, ['manufacturer_uid', 'name', 'is_deleted'], selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
         }
         updateStatus({ message: 'Manufacturers processed.', status: 'success' });
     }
@@ -1042,7 +1068,7 @@ export const generateCsvsFromExcel = async (
 
     switch (detectedType) {
         case 'STORE':
-            csvFiles = await processStoresFile(workbook, sheetName, updateStatus, selectedColumns, signal);
+            csvFiles = await processStoresFile(workbook, sheetName, updateStatus, options, selectedColumns, signal);
             break;
         case 'STORE_ITEMS':
             csvFiles = await processStoreItemsFile(workbook, sheetName, updateStatus, options, selectedColumns, signal);
@@ -1057,7 +1083,7 @@ export const generateCsvsFromExcel = async (
             csvFiles = await processItemMasterV2File(workbook, sheetName, updateStatus, options, selectedColumns, signal);
             break;
         case 'FACTS':
-            csvFiles = await processFactsFile(workbook, sheetName, updateStatus, selectedColumns, signal);
+            csvFiles = await processFactsFile(workbook, sheetName, updateStatus, options, selectedColumns, signal);
             break;
         case 'STOCK':
         case 'PRICE':

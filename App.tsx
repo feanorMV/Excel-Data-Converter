@@ -44,6 +44,17 @@ const getTodayDateString = (): string => {
     return `${year}${month}${day}`;
 };
 
+const ALL_OUTPUT_COLUMNS = [
+    'store_uid', 'name', 'region', 'group_name', 'floor_space', 'in_shelf', 'licence_start_date', 'is_deleted',
+    'item_uid', 'is_active_planogram', 'purchase_price', 'retail_price', 'external_supplier_uid',
+    'supplier_uid', 'date', 'stock', 'sold_qty', 'revenue', 'cogs',
+    'manufacturer_uid', 'brand_uid', 'is_fractional', 'additional_1', 'additional_2', 'additional_3', 'additional_4',
+    'additional_5', 'additional_6', 'additional_7', 'additional_8', 'additional_9', 'additional_10', 'additional_11',
+    'additional_12', 'additional_13', 'additional_14', 'additional_15', 'additional_16', 'additional_17', 'additional_18',
+    'additional_19', 'additional_20', 'main_unit_uid', 'erp_category_uid', 'barcode', 'is_main',
+    'unit_name', 'width', 'height', 'depth', 'netweight', 'volume', 'dimension_uid', 'coef', 'parent_category_uid'
+];
+
 export const App: React.FC = () => {
     const [fileInfos, setFileInfos] = useState<FileInfo[]>([]);
     const [archiveName, setArchiveName] = useState<string>('data_export');
@@ -52,9 +63,11 @@ export const App: React.FC = () => {
     const [errorMessage, setErrorMessage] = useState<string>('');
     const [zipUrl, setZipUrl] = useState<string | null>(null);
     const [zipFileName, setZipFileName] = useState<string>('');
-    const [csvOptions, setCsvOptions] = useState<CsvGenerationOptions>({});
+    const [csvOptions, setCsvOptions] = useState<CsvGenerationOptions>({ delimiter: ',' });
     const [isAdvancedOptionsOpen, setIsAdvancedOptionsOpen] = useState(false);
     const [selectedColumns, setSelectedColumns] = useState<Record<string, boolean>>({});
+    const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
+    const [generatedFilesSummary, setGeneratedFilesSummary] = useState<{ name: string, rowCount: number }[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -63,7 +76,9 @@ export const App: React.FC = () => {
         setStatusUpdates([]);
         setErrorMessage('');
         setZipUrl(null);
-        setCsvOptions({});
+        setCsvOptions({ delimiter: ',' });
+        setColumnMapping({});
+        setGeneratedFilesSummary([]);
         if (zipUrl) {
             URL.revokeObjectURL(zipUrl);
         }
@@ -145,6 +160,7 @@ export const App: React.FC = () => {
         setStatusUpdates([]);
         setErrorMessage('');
         setZipUrl(null);
+        setGeneratedFilesSummary([]);
         
         abortControllerRef.current = new AbortController();
         
@@ -170,7 +186,7 @@ export const App: React.FC = () => {
             };
 
             try {
-                const { csvFiles } = await generateCsvsFromExcel(info.file, updateCallback, csvOptions, selectedColumns, false, abortControllerRef.current.signal);
+                const { csvFiles } = await generateCsvsFromExcel(info.file, updateCallback, { ...csvOptions, columnMapping }, selectedColumns, false, abortControllerRef.current.signal);
                 csvFiles.forEach(csv => allGeneratedCsvs.push(csv));
                 hasProcessedAnyFile = true;
                 setFileInfos(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'success', progress: 100 } : f));
@@ -205,6 +221,7 @@ export const App: React.FC = () => {
         }
 
         if (allGeneratedCsvs.length > 0) {
+            setGeneratedFilesSummary(allGeneratedCsvs.map(csv => ({ name: csv.name, rowCount: csv.rowCount })));
             // FIX: Wrap zip generation in a try-catch block to handle potential errors.
             try {
                 allGeneratedCsvs.forEach(csv => {
@@ -464,11 +481,27 @@ export const App: React.FC = () => {
                             <a
                                 href={zipUrl}
                                 download={zipFileName}
-                                className="w-full inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-secondary hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-all duration-300"
+                                className="w-full inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-secondary hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-all duration-300 mb-4"
                             >
                                 <Download className="-ml-1 mr-3 h-5 w-5"/>
                                 Download ZIP File ({zipFileName})
                             </a>
+
+                            {generatedFilesSummary.length > 0 && (
+                                <div className="mt-4 bg-gray-50 rounded-lg p-4 border border-gray-200">
+                                    <h4 className="text-md font-semibold mb-3 text-gray-800">Generated Files Summary:</h4>
+                                    <ul className="space-y-2 text-sm text-gray-600 max-h-60 overflow-y-auto pr-2">
+                                        {generatedFilesSummary.map((file, idx) => (
+                                            <li key={idx} className="flex justify-between items-center border-b border-gray-100 pb-2 last:border-0 last:pb-0">
+                                                <span className="font-medium text-gray-700 truncate mr-4" title={file.name}>{file.name}</span>
+                                                <span className="bg-white px-2 py-1 rounded shadow-sm text-xs font-bold text-primary whitespace-nowrap">
+                                                    {file.rowCount.toLocaleString()} rows
+                                                </span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
                         </div>
                     )}
                 </main>
@@ -483,21 +516,46 @@ export const App: React.FC = () => {
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full">
                         <h2 className="text-2xl font-bold mb-4">Advanced Options</h2>
-                        <div className="space-y-4">
+                        <div className="space-y-6">
                             <div>
-                                <h3 className="text-lg font-semibold">Column Filtering</h3>
-                                <p className="text-sm text-gray-500">Select which columns to include in the output.</p>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 pt-2 max-h-60 overflow-y-auto">
-                                    {[...new Set(fileInfos.flatMap(f => f.headers))].map(header => (
-                                        <label key={header} className="flex items-center space-x-3 cursor-pointer">
+                                <h3 className="text-lg font-semibold">CSV Delimiter</h3>
+                                <p className="text-sm text-gray-500 mb-2">Select the delimiter to use for the generated CSV files.</p>
+                                <select
+                                    value={csvOptions.delimiter as string}
+                                    onChange={(e) => setCsvOptions(prev => ({ ...prev, delimiter: e.target.value }))}
+                                    className="block w-full max-w-xs px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-focus focus:border-primary-focus sm:text-sm"
+                                >
+                                    <option value=",">Comma (,)</option>
+                                    <option value=";">Semicolon (;)</option>
+                                    <option value="\t">Tab</option>
+                                    <option value="|">Pipe (|)</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <h3 className="text-lg font-semibold">Column Filtering & Mapping</h3>
+                                <p className="text-sm text-gray-500 mb-2">Select which output columns to include and optionally rename them.</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-2 max-h-96 overflow-y-auto pr-2">
+                                    {ALL_OUTPUT_COLUMNS.map(header => (
+                                        <div key={header} className="flex items-center space-x-3">
                                             <input
                                                 type="checkbox"
                                                 checked={selectedColumns[header] ?? true}
                                                 onChange={() => setSelectedColumns(prev => ({ ...prev, [header]: !(prev[header] ?? true) }))}
                                                 className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-focus transition"
                                             />
-                                            <span className="text-sm font-medium text-gray-700">{header}</span>
-                                        </label>
+                                            <div className="flex flex-col flex-grow">
+                                                <span className="text-sm font-medium text-gray-700">{header}</span>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Rename to..."
+                                                    value={columnMapping[header] || ''}
+                                                    onChange={(e) => setColumnMapping(prev => ({ ...prev, [header]: e.target.value }))}
+                                                    disabled={!(selectedColumns[header] ?? true)}
+                                                    className="mt-1 block w-full px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:outline-none focus:ring-primary-focus focus:border-primary-focus disabled:bg-gray-100 disabled:text-gray-400"
+                                                />
+                                            </div>
+                                        </div>
                                     ))}
                                 </div>
                             </div>

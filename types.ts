@@ -17,6 +17,11 @@ export type ExcelRow = Record<string, string | number | Date | null>;
 export interface CsvFile {
     name: string;
     content: string;
+    rowCount: number;
 }
 
-export type CsvGenerationOptions = Record<string, boolean>;
+export interface CsvGenerationOptions {
+    [key: string]: boolean | string | Record<string, string> | undefined;
+    delimiter?: string;
+    columnMapping?: Record<string, string>;
+}
