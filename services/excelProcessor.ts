@@ -71,12 +71,28 @@ function formatDateToYYYYMMDD(date: Date): string {
     return `${year}-${month}-${day}`;
 }
 
+const ADDITIONAL_HEADERS_KEYWORDS = Array.from({ length: 20 }, (_, i) => [`Add ${i + 1}`, `additional_${i + 1}`]).flat();
+
+function getIsDeletedValue(row: any): number {
+    const val = row['Deleted'] ?? row['Is Deleted'] ?? row['Is deleted'] ?? row['To delete'] ?? row['To Delete'] ?? row['is_deleted'];
+    if (val !== undefined && val !== null && String(val).trim() !== '') {
+        if (typeof val === 'boolean') return val ? 1 : 0;
+        const strVal = String(val).toLowerCase().trim();
+        if (strVal === 'true' || strVal === 'yes') return 1;
+        if (strVal === 'false' || strVal === 'no') return 0;
+        const parsed = parseInt(strVal, 10);
+        return isNaN(parsed) ? 0 : parsed;
+    }
+    return 0;
+}
+
 function getHeaders(worksheet: any, keywords: string[]): string[] {
     const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false });
     let headerRowIndex = -1;
+    const searchKeywords = [...keywords, ...ADDITIONAL_HEADERS_KEYWORDS];
     for (let i = 0; i < rawData.length; i++) {
         const row = rawData[i];
-        if (row && row.some(cell => typeof cell === 'string' && keywords.some(kw => cell.includes(kw)))) {
+        if (row && row.some(cell => typeof cell === 'string' && searchKeywords.some(kw => cell.includes(kw)))) {
             headerRowIndex = i;
             break;
         }
@@ -184,7 +200,7 @@ async function processStoresFile(workbook: any, sheetName: string, updateStatus:
             floor_space: parseInt(String(rowObject['Square']), 10) || 0,
             in_shelf: parseInt(String(rowObject['In Shelf?']), 10) || 0,
             licence_start_date: '2023-01-01',
-            is_deleted: parseInt(String(rowObject['To delete']), 10) || 0,
+            is_deleted: getIsDeletedValue(rowObject),
         });
 
         if (i % 1000 === 0) {
@@ -445,10 +461,11 @@ async function processItemMasterFile(workbook: any, sheetName: string, updateSta
     if (signal?.aborted) throw new Error('Processing cancelled by user');
 
     let headerRowIndex = -1;
+    const searchKeywords = [...FILE_TYPE_DEFINITIONS.ITEM_MASTER.keywords, ...ADDITIONAL_HEADERS_KEYWORDS];
     for (let i = 0; i < rawData.length; i++) {
         if (signal?.aborted) throw new Error('Processing cancelled by user');
         const row = rawData[i];
-        if (row && row.some(cell => typeof cell === 'string' && FILE_TYPE_DEFINITIONS.ITEM_MASTER.keywords.some(kw => cell.includes(kw)))) {
+        if (row && row.some(cell => typeof cell === 'string' && searchKeywords.some(kw => cell.includes(kw)))) {
             headerRowIndex = i;
             break;
         }
@@ -504,7 +521,25 @@ async function processItemMasterFile(workbook: any, sheetName: string, updateSta
                 }
 
                 if (!seenUids.has(uid)) {
-                    masteritemsData.push({ item_uid: uid, name: row['Product name*'], manufacturer_uid: row['Manufacturer'], brand_uid: row['Brand'], is_fractional: row['Is fractional?'] ? parseInt(String(row['Is fractional?']), 10) || 0 : 0, additional_1: row['Segment Description'], additional_2: row['Family Description'], additional_3: row['Class Description'], additional_4: row['Brick Description'], main_unit_uid: main_unit_uid, erp_category_uid: row['Brick Code'], });
+                    const getAdd = (num: number) => row[`Add ${num}`] ?? row[`additional_${num}`];
+                    masteritemsData.push({ 
+                        item_uid: uid, 
+                        name: row['Product name*'], 
+                        manufacturer_uid: row['Manufacturer'], 
+                        brand_uid: row['Brand'], 
+                        is_fractional: row['Is fractional?'] ? parseInt(String(row['Is fractional?']), 10) || 0 : 0, 
+                        is_deleted: getIsDeletedValue(row),
+                        additional_1: row['Segment Description'] ?? getAdd(1), 
+                        additional_2: row['Family Description'] ?? getAdd(2), 
+                        additional_3: row['Class Description'] ?? getAdd(3), 
+                        additional_4: row['Brick Description'] ?? getAdd(4), 
+                        additional_5: getAdd(5), additional_6: getAdd(6), additional_7: getAdd(7), additional_8: getAdd(8),
+                        additional_9: getAdd(9), additional_10: getAdd(10), additional_11: getAdd(11), additional_12: getAdd(12),
+                        additional_13: getAdd(13), additional_14: getAdd(14), additional_15: getAdd(15), additional_16: getAdd(16),
+                        additional_17: getAdd(17), additional_18: getAdd(18), additional_19: getAdd(19), additional_20: getAdd(20),
+                        main_unit_uid: main_unit_uid, 
+                        erp_category_uid: row['Brick Code'], 
+                    });
                     seenUids.add(uid);
                 }
                 if (row['Barcode']) barcodesData.push({ item_uid: uid, barcode: row['Barcode'], is_main: 1 });
@@ -538,7 +573,7 @@ async function processItemMasterFile(workbook: any, sheetName: string, updateSta
         rowCount: masteritemsData.length,
         content: await arrayToCsv(
             masteritemsData, 
-            ['item_uid', 'name', 'manufacturer_uid', 'brand_uid', 'is_fractional', 'additional_1', 'additional_2', 'additional_3', 'additional_4', 'main_unit_uid', 'erp_category_uid'], 
+            ['item_uid', 'name', 'manufacturer_uid', 'brand_uid', 'is_fractional', 'is_deleted', 'additional_1', 'additional_2', 'additional_3', 'additional_4', 'additional_5', 'additional_6', 'additional_7', 'additional_8', 'additional_9', 'additional_10', 'additional_11', 'additional_12', 'additional_13', 'additional_14', 'additional_15', 'additional_16', 'additional_17', 'additional_18', 'additional_19', 'additional_20', 'main_unit_uid', 'erp_category_uid'], 
             selectedColumns,
             (p) => updateStatus({ message: 'Generating Masteritems CSV...', status: 'processing', progress: 50 + Math.round(p / 10) }),
             signal,
@@ -570,10 +605,11 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
     if (signal?.aborted) throw new Error('Processing cancelled by user');
 
     let headerRowIndex = -1;
+    const searchKeywords = [...FILE_TYPE_DEFINITIONS.ITEM_MASTER_V2.keywords, ...ADDITIONAL_HEADERS_KEYWORDS];
     for (let i = 0; i < rawData.length; i++) {
         if (signal?.aborted) throw new Error('Processing cancelled by user');
         const row = rawData[i];
-        if (row && row.some(cell => typeof cell === 'string' && FILE_TYPE_DEFINITIONS.ITEM_MASTER_V2.keywords.some(kw => cell.includes(kw)))) {
+        if (row && row.some(cell => typeof cell === 'string' && searchKeywords.some(kw => cell.includes(kw)))) {
             headerRowIndex = i;
             break;
         }
@@ -658,28 +694,36 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
             effectiveManufUid = manufNameValue;
         }
 
+        const getAddVal = (row: any, num: number) => row[`Add ${num}`] ?? row[`additional_${num}`];
+        const getFloatAddVal = (row: any, num: number) => {
+            const val = getAddVal(row, num);
+            return val !== null && val !== undefined && String(val).trim() !== '' ? (parseFloat(String(val).replace(',', '.')) || null) : null;
+        };
+
         masteritemsData.push({
             item_uid: item_uid, name: row['Product name*'], manufacturer_uid: effectiveManufUid, brand_uid: effectiveBrandUid,
             is_fractional: parseInt(String(row['Is fractional?']), 10) || 0,
-            main_unit_uid: main_unit_uid, is_deleted: parseInt(String(row['To delete']), 10) || 0,
-            additional_1: parseFloat(String(row['Add 1']).replace(',', '.')) || null,
-            additional_2: row['Add 2'], additional_3: row['Add 3'], additional_4: row['Add 4'],
-            additional_5: parseFloat(String(row['Add 5']).replace(',', '.')) || null,
-            additional_6: parseFloat(String(row['Add 6']).replace(',', '.')) || null,
-            additional_7: row['Add 7'],
-            additional_8: parseFloat(String(row['Add 8']).replace(',', '.')) || null,
-            additional_9: parseFloat(String(row['Add 9']).replace(',', '.')) || null,
-            additional_10: parseFloat(String(row['Add 10']).replace(',', '.')) || null,
-            additional_11: parseFloat(String(row['Add 11']).replace(',', '.')) || null,
-            additional_12: parseFloat(String(row['Add 12']).replace(',', '.')) || null,
-            additional_13: parseFloat(String(row['Add 13']).replace(',', '.')) || null,
-            additional_14: parseFloat(String(row['Add 14']).replace(',', '.')) || null,
-            additional_15: parseFloat(String(row['Add 15']).replace(',', '.')) || null,
-            additional_16: parseFloat(String(row['Add 16']).replace(',', '.')) || null,
-            additional_17: parseFloat(String(row['Add 17']).replace(',', '.')) || null,
-            additional_18: parseFloat(String(row['Add 18']).replace(',', '.')) || null,
-            additional_19: parseFloat(String(row['Add 19']).replace(',', '.')) || null,
-            additional_20: parseFloat(String(row['Add 20']).replace(',', '.')) || null,
+            main_unit_uid: main_unit_uid, is_deleted: getIsDeletedValue(row),
+            additional_1: getFloatAddVal(row, 1),
+            additional_2: getAddVal(row, 2),
+            additional_3: getAddVal(row, 3),
+            additional_4: getAddVal(row, 4),
+            additional_5: getFloatAddVal(row, 5),
+            additional_6: getFloatAddVal(row, 6),
+            additional_7: getAddVal(row, 7),
+            additional_8: getFloatAddVal(row, 8),
+            additional_9: getFloatAddVal(row, 9),
+            additional_10: getFloatAddVal(row, 10),
+            additional_11: getFloatAddVal(row, 11),
+            additional_12: getFloatAddVal(row, 12),
+            additional_13: getFloatAddVal(row, 13),
+            additional_14: getFloatAddVal(row, 14),
+            additional_15: getFloatAddVal(row, 15),
+            additional_16: getFloatAddVal(row, 16),
+            additional_17: getFloatAddVal(row, 17),
+            additional_18: getFloatAddVal(row, 18),
+            additional_19: getFloatAddVal(row, 19),
+            additional_20: getFloatAddVal(row, 20),
             erp_category_uid: erpCategoryUid
         });
 
@@ -781,10 +825,11 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
     if (signal?.aborted) throw new Error('Processing cancelled by user');
 
     let headerRowIndex = -1;
+    const searchKeywords = ["UID*", "Product name*", "Barcode", "Manufacturer", ...ADDITIONAL_HEADERS_KEYWORDS];
     for (let i = 0; i < rawData.length; i++) {
         if (signal?.aborted) throw new Error('Processing cancelled by user');
         const row = rawData[i];
-        if (row && row.some(cell => typeof cell === 'string' && ["UID*", "Product name*", "Barcode", "Manufacturer"].some(kw => cell.includes(kw)))) {
+        if (row && row.some(cell => typeof cell === 'string' && searchKeywords.some(kw => cell.includes(kw)))) {
             headerRowIndex = i;
             break;
         }
@@ -851,6 +896,22 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
         const parsed_val = parseInt(String(is_fractional_val), 10);
         newRow['is_fractional'] = isNaN(parsed_val) ? 0 : parsed_val;
 
+        newRow['is_deleted'] = getIsDeletedValue(row);
+
+        // Extract additional_1 to additional_20 if present, fallback to Segment Description etc for 1-4
+        for (let j = 1; j <= 20; j++) {
+            const val = row[`Add ${j}`] ?? row[`additional_${j}`];
+            if (val !== undefined && val !== null && String(val).trim() !== '') {
+                if ([2, 3, 4, 7].includes(j)) {
+                    newRow[`additional_${j}`] = val; // text
+                } else {
+                    newRow[`additional_${j}`] = parseFloat(String(val).replace(',', '.')) || null; // float
+                }
+            } else if (j > 4 && !( `additional_${j}` in newRow )) {
+                newRow[`additional_${j}`] = null;
+            }
+        }
+
         if (newRow.item_uid && newRow.name) {
             df_masteritems.push(newRow);
         }
@@ -870,8 +931,12 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
 
 
     const column_order = [
-        'item_uid', 'name', 'manufacturer_uid', 'brand_uid', 'is_fractional',
+        'item_uid', 'name', 'manufacturer_uid', 'brand_uid', 'is_fractional', 'is_deleted',
         'additional_1', 'additional_2', 'additional_3', 'additional_4',
+        'additional_5', 'additional_6', 'additional_7', 'additional_8',
+        'additional_9', 'additional_10', 'additional_11', 'additional_12',
+        'additional_13', 'additional_14', 'additional_15', 'additional_16',
+        'additional_17', 'additional_18', 'additional_19', 'additional_20',
         'main_unit_uid', 'erp_category_uid'
     ];
 
