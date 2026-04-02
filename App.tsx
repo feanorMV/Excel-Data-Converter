@@ -47,7 +47,7 @@ const getTodayDateString = (): string => {
 const ALL_OUTPUT_COLUMNS = [
     'store_uid', 'name', 'region', 'group_name', 'floor_space', 'in_shelf', 'licence_start_date', 'is_deleted',
     'item_uid', 'is_active_planogram', 'purchase_price', 'retail_price', 'external_supplier_uid',
-    'supplier_uid', 'date', 'stock', 'sold_qty', 'revenue', 'cogs',
+    'supplier_uid', 'date', 'stock', 'sold_qty', 'revenue', 'cogs', 'price_list', 'price',
     'manufacturer_uid', 'brand_uid', 'is_fractional', 'additional_1', 'additional_2', 'additional_3', 'additional_4',
     'additional_5', 'additional_6', 'additional_7', 'additional_8', 'additional_9', 'additional_10', 'additional_11',
     'additional_12', 'additional_13', 'additional_14', 'additional_15', 'additional_16', 'additional_17', 'additional_18',
@@ -251,7 +251,7 @@ export const App: React.FC = () => {
             }
         }
 
-    }, [fileInfos, archiveName, csvOptions]);
+    }, [fileInfos, archiveName, csvOptions, selectedColumns, columnMapping]);
 
     const handleReset = () => {
         setFileInfos([]);

@@ -21,7 +21,47 @@ export interface CsvFile {
 }
 
 export interface CsvGenerationOptions {
-    [key: string]: boolean | string | Record<string, string> | undefined;
+    [key: string]: boolean | string | Record<string, string> | PerTypeConfig | undefined;
     delimiter?: string;
     columnMapping?: Record<string, string>;
+    perTypeConfig?: PerTypeConfig;
+}
+
+export interface FieldRule {
+  field: string;
+  rule: 'static' | 'concat' | 'coalesce' | 'prefix' | 'suffix';
+  sources?: string[];
+  source?: string;
+  value?: string;
+  separator?: string;
+}
+
+export interface PerTypeConfig {
+  csvOptions?: Record<string, boolean>;
+  selectedColumns?: Record<string, boolean>;
+  columnMapping?: Record<string, string>;
+  fieldRules?: FieldRule[];
+}
+
+export interface AppConfig {
+  id: string;
+  name: string;
+  createdAt: string;
+  delimiter: string;
+  archiveName: string;
+  globalCsvOptions: Record<string, boolean>;
+  globalSelectedColumns: Record<string, boolean>;
+  globalColumnMapping: Record<string, string>;
+  perType: Partial<Record<FileType, PerTypeConfig>>;
+}
+
+export interface ProcessingWarning {
+  type: 'duplicate_uid' | 'missing_required' | 'fallback_uid' | 'unparseable_date' | 'empty_barcode';
+  count: number;
+  examples: string[];
+}
+
+export interface ProcessingStats {
+  outputRows: Record<string, number>;
+  warnings: ProcessingWarning[];
 }

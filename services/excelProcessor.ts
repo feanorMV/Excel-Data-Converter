@@ -92,7 +92,7 @@ const FILE_TYPE_DEFINITIONS = {
     STORE_ITEMS: { keywords: ["Store UID*", "Product UID*", "In assortment?", "Purchase price"] },
     FACTS: { keywords: ["Product UID*", "Store UID*", "Date*"] },
     ITEM_MASTER_UPDATED: { keywords: ["UID*", "Product name*", "Manufacturer", "Brand", "Is fractional?", "Segment Description", "Brick Code"] },
-    ITEM_MASTER_V2: { keywords: ["UID*", "Product name*", "Manufacturer UID"] },
+    ITEM_MASTER_V2: { keywords: ["UID*", "Product name*", "Category level 1"] },
     ITEM_MASTER: { keywords: ["UID*", "Product name*", "Barcode", "Manufacturer"] },
     STOCK: { keywords: ['StoreID', 'ItemUID', 'Quantity'] },
     PRICE: { keywords: ['ItemUID', 'PriceList', 'Price'] },
@@ -617,20 +617,16 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
         let erpCategoryUid: string | number | Date | null = null;
         for (let j = 6; j >= 1; j--) {
             const catUidCol = `Category level ${j} UID`;
-            const val = row[catUidCol];
-            if (val !== null && val !== undefined && String(val).trim() !== '') {
-                erpCategoryUid = val;
+            const catNameCol = `Category level ${j}`;
+            const uidVal = row[catUidCol];
+            const nameVal = row[catNameCol];
+            
+            if (uidVal !== null && uidVal !== undefined && String(uidVal).trim() !== '') {
+                erpCategoryUid = uidVal;
                 break;
-            }
-        }
-        if (erpCategoryUid === null) {
-            for (let j = 6; j >= 1; j--) {
-                const catNameCol = `Category level ${j}`;
-                const val = row[catNameCol];
-                if (val !== null && val !== undefined && String(val).trim() !== '') {
-                    erpCategoryUid = val;
-                    break;
-                }
+            } else if (nameVal !== null && nameVal !== undefined && String(nameVal).trim() !== '') {
+                erpCategoryUid = nameVal;
+                break;
             }
         }
 
