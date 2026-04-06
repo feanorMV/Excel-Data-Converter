@@ -106,7 +106,7 @@ export function importConfigFromFile(file: File): Promise<AppConfig> {
         // Ensure id is unique if imported
         config.id = Date.now().toString();
         resolve(config);
-      } catch (err) {
+      } catch {
         reject(new Error('Failed to parse JSON file.'));
       }
     };

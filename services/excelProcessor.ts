@@ -2,7 +2,13 @@
 import * as XLSX from 'xlsx';
 import type { StatusUpdateCallback, ExcelRow, CsvFile, FileType, CsvGenerationOptions } from '../types.ts';
 
-const yieldToUI = () => new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+const yieldToUI = () => new Promise(resolve => {
+    if (typeof requestAnimationFrame !== 'undefined') {
+        requestAnimationFrame(() => setTimeout(resolve, 0));
+    } else {
+        setTimeout(resolve, 0);
+    }
+});
 
 // --- UTILITY FUNCTIONS ---
 
@@ -86,8 +92,16 @@ function getIsDeletedValue(row: any): number {
     return 0;
 }
 
-function getHeaders(worksheet: any, keywords: string[]): string[] {
-    const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false });
+function getHeadersAndDataStart(worksheet: any, keywords: string[], skipRowsAfterHeader: number = 0): { headers: string[], headerRowIndex: number, dataStartIndex: number } {
+    let rawData: any[][] = [];
+    if (worksheet['!ref']) {
+        const range = XLSX.utils.decode_range(worksheet['!ref']);
+        const detectionRange = { s: { r: 0, c: 0 }, e: { r: Math.min(range.e.r, 100), c: range.e.c } };
+        rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false, range: detectionRange });
+    } else {
+        rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false });
+    }
+
     let headerRowIndex = -1;
     const searchKeywords = [...keywords, ...ADDITIONAL_HEADERS_KEYWORDS];
     for (let i = 0; i < rawData.length; i++) {
@@ -97,8 +111,23 @@ function getHeaders(worksheet: any, keywords: string[]): string[] {
             break;
         }
     }
-    if (headerRowIndex === -1) return [];
-    return rawData[headerRowIndex].map(h => String(h || '').trim());
+    
+    if (headerRowIndex === -1) return { headers: [], headerRowIndex: -1, dataStartIndex: -1 };
+
+    const headers = rawData[headerRowIndex].map(h => String(h || '').trim());
+    let dataStartIndex = headerRowIndex + 1 + skipRowsAfterHeader;
+
+    if (skipRowsAfterHeader === 0) {
+        // Find first non-empty row if not explicitly skipping
+        for (let i = headerRowIndex + 1; i < rawData.length; i++) {
+            if (rawData[i] && rawData[i].some(cell => cell !== null && String(cell).trim() !== '')) {
+                dataStartIndex = i;
+                break;
+            }
+        }
+    }
+
+    return { headers, headerRowIndex, dataStartIndex };
 }
 
 // --- FILE TYPE DETECTION ---
@@ -126,9 +155,14 @@ const detectFileType = (workbook: any): { type: FileType; sheetName: string | nu
         const sheet = workbook.Sheets[sheetName];
         if (!sheet) continue;
         
-        // Read rows for detection. Since we use sheetRows: 100 in XLSX.read for detection, 
-        // jsonData will already be limited to 100 rows if isDetectionOnly was true.
-        const jsonData: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: false });
+        let jsonData: any[][] = [];
+        if (sheet['!ref']) {
+            const range = XLSX.utils.decode_range(sheet['!ref']);
+            const detectionRange = { s: { r: 0, c: 0 }, e: { r: Math.min(range.e.r, 100), c: range.e.c } };
+            jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: false, range: detectionRange });
+        } else {
+            jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: false });
+        }
         sheetDataCache.set(sheetName, jsonData);
     }
 
@@ -157,40 +191,27 @@ const detectFileType = (workbook: any): { type: FileType; sheetName: string | nu
 /**
  * Processes a "Stores" file.
  */
-async function processStoresFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, signal?: AbortSignal): Promise<CsvFile[]> {
+async function processStoresFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, headersInfo: { headers: string[], dataStartIndex: number }, signal?: AbortSignal): Promise<CsvFile[]> {
     updateStatus({ message: `Processing Stores file from sheet "${sheetName}"...`, status: 'processing' });
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
 
-    const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false });
+    if (headersInfo.dataStartIndex === -1) throw new Error('Could not find a valid header row in the Stores sheet.');
+    
+    // Read data directly into objects
+    const df_template: any[] = XLSX.utils.sheet_to_json(worksheet, { 
+        header: headersInfo.headers, 
+        range: headersInfo.dataStartIndex, 
+        defval: null, 
+        raw: false 
+    });
     await yieldToUI();
     if (signal?.aborted) throw new Error('Processing cancelled by user');
 
-    let headerRowIndex = -1;
-    for (let i = 0; i < rawData.length; i++) {
-        if (signal?.aborted) throw new Error('Processing cancelled by user');
-        const row = rawData[i];
-        if (row && row.some(cell => typeof cell === 'string' && FILE_TYPE_DEFINITIONS.STORE.keywords.some(kw => cell.includes(kw)))) {
-            headerRowIndex = i;
-            break;
-        }
-    }
-    if (headerRowIndex === -1) throw new Error('Could not find a valid header row in the Stores sheet.');
-    
-    const headers = rawData[headerRowIndex].map(h => String(h || '').trim());
-    const dataRows = rawData.slice(headerRowIndex + 1);
-
     const storesData: any[] = [];
-    for (let i = 0; i < dataRows.length; i++) {
+    for (let i = 0; i < df_template.length; i++) {
         if (signal?.aborted) throw new Error('Processing cancelled by user');
-        const row = dataRows[i];
-        const rowObject: ExcelRow = {};
-        headers.forEach((header, index) => {
-            if (header) {
-                const value = row[index];
-                rowObject[header] = value;
-            }
-        });
+        const rowObject = df_template[i];
         
         storesData.push({
             store_uid: rowObject['Store UID*'],
@@ -238,42 +259,28 @@ async function processStoresFile(workbook: any, sheetName: string, updateStatus:
 /**
  * Processes a "Store Items" file containing assortment, pricing, and supplier data.
  */
-async function processStoreItemsFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, signal?: AbortSignal): Promise<CsvFile[]> {
+async function processStoreItemsFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, headersInfo: { headers: string[], dataStartIndex: number }, signal?: AbortSignal): Promise<CsvFile[]> {
     updateStatus({ message: `Processing Store Items file from sheet "${sheetName}"...`, status: 'processing' });
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
 
-    const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false });
+    if (headersInfo.dataStartIndex === -1) throw new Error('Could not find a valid header row in the Items sheet.');
+    
+    const df_template: any[] = XLSX.utils.sheet_to_json(worksheet, { 
+        header: headersInfo.headers, 
+        range: headersInfo.dataStartIndex, 
+        defval: null, 
+        raw: false 
+    });
     await yieldToUI();
     if (signal?.aborted) throw new Error('Processing cancelled by user');
-
-    let headerRowIndex = -1;
-    for (let i = 0; i < rawData.length; i++) {
-        if (signal?.aborted) throw new Error('Processing cancelled by user');
-        const row = rawData[i];
-        if (row && row.some(cell => typeof cell === 'string' && FILE_TYPE_DEFINITIONS.STORE_ITEMS.keywords.some(kw => cell.includes(kw)))) {
-            headerRowIndex = i;
-            break;
-        }
-    }
-    if (headerRowIndex === -1) throw new Error('Could not find a valid header row in the Items sheet.');
-    
-    const headers = rawData[headerRowIndex].map(h => String(h || '').trim());
-    const dataRows = rawData.slice(headerRowIndex + 1);
 
     const itemsData: any[] = [];
     const suppliersMap = new Map<string, any>();
 
-    for (let i = 0; i < dataRows.length; i++) {
+    for (let i = 0; i < df_template.length; i++) {
         if (signal?.aborted) throw new Error('Processing cancelled by user');
-        const row = dataRows[i];
-        const rowObject: ExcelRow = {};
-        headers.forEach((header, index) => {
-            if (header) {
-                const value = row[index];
-                rowObject[header] = value;
-            }
-        });
+        const rowObject = df_template[i];
 
         const storeUid = rowObject['Store UID*'];
         const itemUid = rowObject['Product UID*'];
@@ -349,40 +356,26 @@ async function processStoreItemsFile(workbook: any, sheetName: string, updateSta
 /**
  * Processes a "Facts" file containing sales and stock data.
  */
-async function processFactsFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, signal?: AbortSignal): Promise<CsvFile[]> {
+async function processFactsFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, headersInfo: { headers: string[], dataStartIndex: number }, signal?: AbortSignal): Promise<CsvFile[]> {
     updateStatus({ message: `Processing Facts file from sheet "${sheetName}"...`, status: 'processing' });
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
 
-    const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false });
+    if (headersInfo.dataStartIndex === -1) throw new Error('Could not find a valid header row in the Facts sheet.');
+
+    const df_template: any[] = XLSX.utils.sheet_to_json(worksheet, { 
+        header: headersInfo.headers, 
+        range: headersInfo.dataStartIndex, 
+        defval: null, 
+        raw: false 
+    });
     await yieldToUI();
     if (signal?.aborted) throw new Error('Processing cancelled by user');
 
-    let headerRowIndex = -1;
-    for (let i = 0; i < rawData.length; i++) {
-        if (signal?.aborted) throw new Error('Processing cancelled by user');
-        const row = rawData[i];
-        if (row && row.some(cell => typeof cell === 'string' && FILE_TYPE_DEFINITIONS.FACTS.keywords.some(kw => cell.includes(kw)))) {
-            headerRowIndex = i;
-            break;
-        }
-    }
-    if (headerRowIndex === -1) throw new Error('Could not find a valid header row in the Facts sheet.');
-
-    const headers = rawData[headerRowIndex].map(h => String(h || '').trim());
-    const dataRows = rawData.slice(headerRowIndex + 1);
-
     const factsData: any[] = [];
-    for (let i = 0; i < dataRows.length; i++) {
+    for (let i = 0; i < df_template.length; i++) {
         if (signal?.aborted) throw new Error('Processing cancelled by user');
-        const row = dataRows[i];
-        const rowObject: ExcelRow = {};
-        headers.forEach((header, index) => {
-            if (header) {
-                const value = row[index];
-                rowObject[header] = value;
-            }
-        });
+        const rowObject = df_template[i];
 
         let formattedDate: string | null = null;
         const dateValue = rowObject['Date*'];
@@ -417,7 +410,7 @@ async function processFactsFile(workbook: any, sheetName: string, updateStatus: 
 
         if (i % 1000 === 0) {
             await yieldToUI();
-            updateStatus({ message: 'Parsing facts data...', status: 'processing', progress: Math.round((i / dataRows.length) * 50) });
+            updateStatus({ message: 'Parsing facts data...', status: 'processing', progress: Math.round((i / df_template.length) * 50) });
         }
     }
 
@@ -451,54 +444,21 @@ async function processFactsFile(workbook: any, sheetName: string, updateStatus: 
 /**
  * Processes the original "Item Master" file format (V1).
  */
-async function processItemMasterFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, signal?: AbortSignal): Promise<CsvFile[]> {
+async function processItemMasterFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, headersInfo: { headers: string[], dataStartIndex: number }, signal?: AbortSignal): Promise<CsvFile[]> {
     updateStatus({ message: `Processing Masteritems file from sheet "${sheetName}"...`, status: 'processing' });
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
     
-    const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false });
+    if (headersInfo.dataStartIndex === -1) throw new Error('Could not find header row in Masteritems file.');
+
+    const df_template: any[] = XLSX.utils.sheet_to_json(worksheet, { 
+        header: headersInfo.headers, 
+        range: headersInfo.dataStartIndex, 
+        defval: null, 
+        raw: false 
+    });
     await yieldToUI();
     if (signal?.aborted) throw new Error('Processing cancelled by user');
-
-    let headerRowIndex = -1;
-    const searchKeywords = [...FILE_TYPE_DEFINITIONS.ITEM_MASTER.keywords, ...ADDITIONAL_HEADERS_KEYWORDS];
-    for (let i = 0; i < rawData.length; i++) {
-        if (signal?.aborted) throw new Error('Processing cancelled by user');
-        const row = rawData[i];
-        if (row && row.some(cell => typeof cell === 'string' && searchKeywords.some(kw => cell.includes(kw)))) {
-            headerRowIndex = i;
-            break;
-        }
-    }
-    if (headerRowIndex === -1) throw new Error('Could not find header row in Masteritems file.');
-
-    const headers = rawData[headerRowIndex].map(h => String(h || '').trim());
-    let dataStartIndex = -1;
-    for (let i = headerRowIndex + 1; i < rawData.length; i++) {
-        if(rawData[i] && rawData[i].some(cell => cell !== null && String(cell).trim() !== '')) {
-            dataStartIndex = i;
-            break;
-        }
-    }
-    
-    const dataRows = dataStartIndex !== -1 ? rawData.slice(dataStartIndex) : [];
-    const df_template: ExcelRow[] = [];
-    for (let i = 0; i < dataRows.length; i++) {
-        if (signal?.aborted) throw new Error('Processing cancelled by user');
-        const row = dataRows[i];
-        const rowObject: ExcelRow = {};
-        headers.forEach((header, index) => {
-            if (header) {
-                const value = row[index];
-                rowObject[header] = value;
-            }
-        });
-        df_template.push(rowObject);
-        if (i % 1000 === 0) {
-            await yieldToUI();
-            updateStatus({ message: 'Parsing masteritems data...', status: 'processing', progress: Math.round((i / dataRows.length) * 25) });
-        }
-    }
 
     const masteritemsData: any[] = [], barcodesData: any[] = [], dimensionsData: any[] = [];
     const seenBrands = new Set<string>(), seenManufacturers = new Set<string>(), seenErpCategories = new Map<string, any>(), seenUids = new Set<string>();
@@ -595,46 +555,27 @@ async function processItemMasterFile(workbook: any, sheetName: string, updateSta
 /**
  * Processes the new, complex "Item Master" file format (V2).
  */
-async function processItemMasterV2File(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, signal?: AbortSignal): Promise<CsvFile[]> {
+async function processItemMasterV2File(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, headersInfo: { headers: string[], dataStartIndex: number }, signal?: AbortSignal): Promise<CsvFile[]> {
     updateStatus({ message: `Processing new Masteritems file from sheet "${sheetName}"...`, status: 'processing' });
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
 
-    const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false });
+    if (headersInfo.dataStartIndex === -1) throw new Error('Could not find header row in the new Masteritems file.');
+    
+    const df_template_raw: any[] = XLSX.utils.sheet_to_json(worksheet, { 
+        header: headersInfo.headers, 
+        range: headersInfo.dataStartIndex, 
+        defval: null, 
+        raw: false 
+    });
     await yieldToUI();
     if (signal?.aborted) throw new Error('Processing cancelled by user');
 
-    let headerRowIndex = -1;
-    const searchKeywords = [...FILE_TYPE_DEFINITIONS.ITEM_MASTER_V2.keywords, ...ADDITIONAL_HEADERS_KEYWORDS];
-    for (let i = 0; i < rawData.length; i++) {
-        if (signal?.aborted) throw new Error('Processing cancelled by user');
-        const row = rawData[i];
-        if (row && row.some(cell => typeof cell === 'string' && searchKeywords.some(kw => cell.includes(kw)))) {
-            headerRowIndex = i;
-            break;
-        }
-    }
-    if (headerRowIndex === -1) throw new Error('Could not find header row in the new Masteritems file.');
-    
-    const headers = rawData[headerRowIndex].map(h => String(h || '').trim());
-    const dataRows = rawData.slice(headerRowIndex + 1);
-    
     const df_template: ExcelRow[] = [];
-    for (let i = 0; i < dataRows.length; i++) {
-        const row = dataRows[i];
-        const rowObject: ExcelRow = {};
-        headers.forEach((header, index) => {
-            if (header) {
-                const value = row[index];
-                rowObject[header] = value;
-            }
-        });
+    for (let i = 0; i < df_template_raw.length; i++) {
+        const rowObject = df_template_raw[i];
         if (rowObject['UID*'] !== null && rowObject['UID*'] !== undefined && String(rowObject['UID*']).trim() !== '') {
             df_template.push(rowObject);
-        }
-        if (i % 1000 === 0) {
-            await yieldToUI();
-            updateStatus({ message: 'Parsing masteritems V2 data...', status: 'processing', progress: Math.round((i / dataRows.length) * 25) });
         }
     }
 
@@ -815,43 +756,21 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
 /**
  * Processes the updated "Item Master" file format based on the provided Python script logic.
  */
-async function processItemMasterUpdatedFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, signal?: AbortSignal): Promise<CsvFile[]> {
+async function processItemMasterUpdatedFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, headersInfo: { headers: string[], dataStartIndex: number }, signal?: AbortSignal): Promise<CsvFile[]> {
     updateStatus({ message: `Processing updated Masteritems file from sheet "${sheetName}"...`, status: 'processing' });
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
 
-    const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false });
+    if (headersInfo.dataStartIndex === -1) throw new Error('Could not find a valid header row in the updated Masteritems sheet.');
+
+    const df_template: any[] = XLSX.utils.sheet_to_json(worksheet, { 
+        header: headersInfo.headers, 
+        range: headersInfo.dataStartIndex, 
+        defval: null, 
+        raw: false 
+    });
     await yieldToUI();
     if (signal?.aborted) throw new Error('Processing cancelled by user');
-
-    let headerRowIndex = -1;
-    const searchKeywords = ["UID*", "Product name*", "Barcode", "Manufacturer", ...ADDITIONAL_HEADERS_KEYWORDS];
-    for (let i = 0; i < rawData.length; i++) {
-        if (signal?.aborted) throw new Error('Processing cancelled by user');
-        const row = rawData[i];
-        if (row && row.some(cell => typeof cell === 'string' && searchKeywords.some(kw => cell.includes(kw)))) {
-            headerRowIndex = i;
-            break;
-        }
-    }
-    if (headerRowIndex === -1) throw new Error('Could not find a valid header row in the updated Masteritems sheet.');
-
-    const headers = rawData[headerRowIndex].map(h => String(h || '').trim());
-    const dataRows = rawData.slice(headerRowIndex + 2);
-
-    const df_template: ExcelRow[] = [];
-    for (let i = 0; i < dataRows.length; i++) {
-        const row = dataRows[i];
-        const rowObject: ExcelRow = {};
-        headers.forEach((header, index) => {
-            if (header) {
-                const value = row[index];
-                rowObject[header] = value;
-            }
-        });
-        df_template.push(rowObject);
-        if (i % 1000 === 0) await yieldToUI();
-    }
 
     // 1. Masteritems CSV
     updateStatus({ message: 'Processing Masteritems...', status: 'processing' });
@@ -1037,7 +956,7 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
             const parent_level_num = level_num - 1;
             const parent_uid_col = parent_level_num > 0 ? `${level_mapping[parent_level_num]} Code` : null;
 
-            if (headers.includes(uid_col) && headers.includes(name_col)) {
+            if (headersInfo.headers.includes(uid_col) && headersInfo.headers.includes(name_col)) {
                 const seenCategories = new Set<string>();
                 for (let i = 0; i < df_template.length; i++) {
                     if (signal?.aborted) throw new Error('Processing cancelled by user');
@@ -1092,6 +1011,124 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
 
 // --- MAIN DISPATCHER ---
 
+async function processStockFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, headersInfo: { headers: string[], dataStartIndex: number }, signal?: AbortSignal): Promise<CsvFile[]> {
+    updateStatus({ message: `Processing Stock file from sheet "${sheetName}"...`, status: 'processing' });
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
+
+    if (headersInfo.dataStartIndex === -1) throw new Error('Could not find a valid header row in the Stock sheet.');
+
+    const df_template: any[] = XLSX.utils.sheet_to_json(worksheet, { 
+        header: headersInfo.headers, 
+        range: headersInfo.dataStartIndex, 
+        defval: null, 
+        raw: false 
+    });
+    await yieldToUI();
+    if (signal?.aborted) throw new Error('Processing cancelled by user');
+
+    const stockData: any[] = [];
+    for (let i = 0; i < df_template.length; i++) {
+        if (signal?.aborted) throw new Error('Processing cancelled by user');
+        const rowObject = df_template[i];
+
+        stockData.push({
+            store_uid: rowObject['StoreID'],
+            item_uid: rowObject['ItemUID'],
+            stock: parseFloat(String(rowObject['Quantity'] || '0').replace(',', '.')) || null,
+        });
+
+        if (i % 1000 === 0) {
+            await yieldToUI();
+            updateStatus({ message: 'Parsing stock data...', status: 'processing', progress: Math.round((i / df_template.length) * 50) });
+        }
+    }
+
+    const filteredStockData = stockData.filter(row => row.item_uid && row.store_uid);
+    
+    if (filteredStockData.length === 0) {
+        updateStatus({ message: 'No valid data rows found in Stock file, skipping CSV generation.', status: 'success', progress: 100 });
+        return [];
+    }
+
+    const dateStr = getTodayDateString();
+    const csvs: CsvFile[] = [{
+        name: `stock_${dateStr}.csv`,
+        rowCount: filteredStockData.length,
+        content: await arrayToCsv(
+            filteredStockData, 
+            ["store_uid", "item_uid", "stock"], 
+            selectedColumns,
+            (p) => updateStatus({ message: 'Generating Stock CSV...', status: 'processing', progress: 50 + Math.round(p / 2) }),
+            signal,
+            options.delimiter,
+            options.columnMapping
+        )
+    }];
+    
+    updateStatus({ message: 'Stock processing complete.', status: 'success', progress: 100 });
+    return csvs;
+}
+
+async function processPriceFile(workbook: any, sheetName: string, updateStatus: StatusUpdateCallback, options: CsvGenerationOptions, selectedColumns: Record<string, boolean> | null, headersInfo: { headers: string[], dataStartIndex: number }, signal?: AbortSignal): Promise<CsvFile[]> {
+    updateStatus({ message: `Processing Price file from sheet "${sheetName}"...`, status: 'processing' });
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) throw new Error(`Sheet "${sheetName}" not found.`);
+
+    if (headersInfo.dataStartIndex === -1) throw new Error('Could not find a valid header row in the Price sheet.');
+
+    const df_template: any[] = XLSX.utils.sheet_to_json(worksheet, { 
+        header: headersInfo.headers, 
+        range: headersInfo.dataStartIndex, 
+        defval: null, 
+        raw: false 
+    });
+    await yieldToUI();
+    if (signal?.aborted) throw new Error('Processing cancelled by user');
+
+    const priceData: any[] = [];
+    for (let i = 0; i < df_template.length; i++) {
+        if (signal?.aborted) throw new Error('Processing cancelled by user');
+        const rowObject = df_template[i];
+
+        priceData.push({
+            item_uid: rowObject['ItemUID'],
+            price_list: rowObject['PriceList'],
+            price: parseFloat(String(rowObject['Price'] || '0').replace(',', '.')) || null,
+        });
+
+        if (i % 1000 === 0) {
+            await yieldToUI();
+            updateStatus({ message: 'Parsing price data...', status: 'processing', progress: Math.round((i / df_template.length) * 50) });
+        }
+    }
+
+    const filteredPriceData = priceData.filter(row => row.item_uid && row.price_list);
+    
+    if (filteredPriceData.length === 0) {
+        updateStatus({ message: 'No valid data rows found in Price file, skipping CSV generation.', status: 'success', progress: 100 });
+        return [];
+    }
+
+    const dateStr = getTodayDateString();
+    const csvs: CsvFile[] = [{
+        name: `price_${dateStr}.csv`,
+        rowCount: filteredPriceData.length,
+        content: await arrayToCsv(
+            filteredPriceData, 
+            ["item_uid", "price_list", "price"], 
+            selectedColumns,
+            (p) => updateStatus({ message: 'Generating Price CSV...', status: 'processing', progress: 50 + Math.round(p / 2) }),
+            signal,
+            options.delimiter,
+            options.columnMapping
+        )
+    }];
+    
+    updateStatus({ message: 'Price processing complete.', status: 'success', progress: 100 });
+    return csvs;
+}
+
 export const generateCsvsFromExcel = async (
     file: File,
     updateStatus: StatusUpdateCallback,
@@ -1106,9 +1143,8 @@ export const generateCsvsFromExcel = async (
     }
     const data = await file.arrayBuffer();
     if (signal?.aborted) throw new Error('Processing cancelled by user');
-    // Use standard reading options without 'dense' mode which can sometimes cause issues with sheet_to_json
     // cellNF: true and cellText: true are crucial for preserving formatted values (like leading zeros)
-    const readOptions: any = { cellDates: true, cellNF: true, cellText: true };
+    const readOptions: any = { cellDates: true, cellNF: true, cellText: true, dense: true };
     if (isDetectionOnly) {
         readOptions.sheetRows = 100; // Read a bit more for safer detection
     }
@@ -1123,33 +1159,37 @@ export const generateCsvsFromExcel = async (
     }
 
     const definition = FILE_TYPE_DEFINITIONS[detectedType as keyof typeof FILE_TYPE_DEFINITIONS];
-    const headers = definition ? getHeaders(workbook.Sheets[sheetName], definition.keywords) : [];
+    const skipRows = detectedType === 'ITEM_MASTER_UPDATED' ? 1 : 0;
+    const headersInfo = definition ? getHeadersAndDataStart(workbook.Sheets[sheetName], definition.keywords, skipRows) : { headers: [], headerRowIndex: -1, dataStartIndex: -1 };
+    const headers = headersInfo.headers;
     
     let csvFiles: CsvFile[] = [];
 
     switch (detectedType) {
         case 'STORE':
-            csvFiles = await processStoresFile(workbook, sheetName, updateStatus, options, selectedColumns, signal);
+            csvFiles = await processStoresFile(workbook, sheetName, updateStatus, options, selectedColumns, headersInfo, signal);
             break;
         case 'STORE_ITEMS':
-            csvFiles = await processStoreItemsFile(workbook, sheetName, updateStatus, options, selectedColumns, signal);
+            csvFiles = await processStoreItemsFile(workbook, sheetName, updateStatus, options, selectedColumns, headersInfo, signal);
             break;
         case 'ITEM_MASTER':
-            csvFiles = await processItemMasterFile(workbook, sheetName, updateStatus, options, selectedColumns, signal);
+            csvFiles = await processItemMasterFile(workbook, sheetName, updateStatus, options, selectedColumns, headersInfo, signal);
             break;
         case 'ITEM_MASTER_UPDATED':
-            csvFiles = await processItemMasterUpdatedFile(workbook, sheetName, updateStatus, options, selectedColumns, signal);
+            csvFiles = await processItemMasterUpdatedFile(workbook, sheetName, updateStatus, options, selectedColumns, headersInfo, signal);
             break;
         case 'ITEM_MASTER_V2':
-            csvFiles = await processItemMasterV2File(workbook, sheetName, updateStatus, options, selectedColumns, signal);
+            csvFiles = await processItemMasterV2File(workbook, sheetName, updateStatus, options, selectedColumns, headersInfo, signal);
             break;
         case 'FACTS':
-            csvFiles = await processFactsFile(workbook, sheetName, updateStatus, options, selectedColumns, signal);
+            csvFiles = await processFactsFile(workbook, sheetName, updateStatus, options, selectedColumns, headersInfo, signal);
             break;
         case 'STOCK':
+            csvFiles = await processStockFile(workbook, sheetName, updateStatus, options, selectedColumns, headersInfo, signal);
+            break;
         case 'PRICE':
-            // Placeholder for other file types
-            throw new Error(`Processing for "${detectedType}" files is not yet implemented.`);
+            csvFiles = await processPriceFile(workbook, sheetName, updateStatus, options, selectedColumns, headersInfo, signal);
+            break;
     }
 
     return { csvFiles, detectedType, headers };

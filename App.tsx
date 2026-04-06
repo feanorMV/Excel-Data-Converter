@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { FolderUp, Download, RefreshCw, AlertTriangle, CheckCircle, Loader2, FileText, XCircle, Settings } from 'lucide-react';
 import JSZip from 'jszip';
-import { generateCsvsFromExcel } from './services/excelProcessor.ts';
+import { runExcelWorker } from './services/workerClient.ts';
 import type { StatusUpdate, FileType, CsvFile, CsvGenerationOptions } from './types.ts';
 
 // Fix for non-standard directory attributes on input element
@@ -120,7 +120,7 @@ export const App: React.FC = () => {
                 
                 try {
                     // Use isDetectionOnly: true to read only the first 50 rows
-                    const { detectedType, headers } = await generateCsvsFromExcel(file, () => {}, {}, null, true);
+                    const { detectedType, headers } = await runExcelWorker(file, () => {}, {}, null, true);
                     setFileInfos(currentInfos => {
                         const newInfos = [...currentInfos];
                         newInfos[i] = {
@@ -186,7 +186,7 @@ export const App: React.FC = () => {
             };
 
             try {
-                const { csvFiles } = await generateCsvsFromExcel(info.file, updateCallback, { ...csvOptions, columnMapping }, selectedColumns, false, abortControllerRef.current.signal);
+                const { csvFiles } = await runExcelWorker(info.file, updateCallback, { ...csvOptions, columnMapping }, selectedColumns, false, abortControllerRef.current.signal);
                 csvFiles.forEach(csv => allGeneratedCsvs.push(csv));
                 hasProcessedAnyFile = true;
                 setFileInfos(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'success', progress: 100 } : f));
