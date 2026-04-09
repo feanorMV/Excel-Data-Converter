@@ -226,7 +226,7 @@ async function processStoresFile(workbook: any, sheetName: string, updateStatus:
 
         if (i % 1000 === 0) {
             await yieldToUI();
-            updateStatus({ message: 'Parsing store data...', status: 'processing', progress: Math.round((i / dataRows.length) * 50) });
+            updateStatus({ message: 'Parsing store data...', status: 'processing', progress: Math.round((i / df_template.length) * 50) });
         }
     }
 
@@ -307,7 +307,7 @@ async function processStoreItemsFile(workbook: any, sheetName: string, updateSta
 
         if (i % 1000 === 0) {
             await yieldToUI();
-            updateStatus({ message: 'Parsing store items data...', status: 'processing', progress: Math.round((i / dataRows.length) * 50) });
+            updateStatus({ message: 'Parsing store items data...', status: 'processing', progress: Math.round((i / df_template.length) * 50) });
         }
     }
     
