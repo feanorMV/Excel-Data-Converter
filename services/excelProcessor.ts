@@ -77,30 +77,86 @@ function formatDateToYYYYMMDD(date: Date): string {
     return `${year}-${month}-${day}`;
 }
 
+function parseExcelDate(dateValue: any): string | null {
+    if (!dateValue) return null;
+    
+    let jsDate: Date | null = null;
+    if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
+        jsDate = dateValue;
+    } else if (typeof dateValue === 'number' && dateValue > 1) {
+        jsDate = excelSerialDateToJSDate(dateValue);
+    } else {
+        const d = new Date(String(dateValue));
+        if (!isNaN(d.getTime())) {
+            jsDate = d;
+        }
+    }
+    
+    return jsDate ? formatDateToYYYYMMDD(jsDate) : null;
+}
+
 const ADDITIONAL_HEADERS_KEYWORDS = Array.from({ length: 20 }, (_, i) => [`Add ${i + 1}`, `additional_${i + 1}`]).flat();
 
 function getIsDeletedValue(row: any): number {
-    const val = row['Deleted'] ?? row['Is Deleted'] ?? row['Is deleted'] ?? row['To delete'] ?? row['To Delete'] ?? row['is_deleted'];
+    let val: any = null;
+    
+    for (const key of Object.keys(row)) {
+        const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (['deleted', 'isdeleted', 'todelete', 'delete'].includes(normalizedKey)) {
+            val = row[key];
+            break;
+        }
+    }
+
     if (val !== undefined && val !== null && String(val).trim() !== '') {
         if (typeof val === 'boolean') return val ? 1 : 0;
         const strVal = String(val).toLowerCase().trim();
-        if (strVal === 'true' || strVal === 'yes') return 1;
-        if (strVal === 'false' || strVal === 'no') return 0;
+        if (strVal === 'true' || strVal === 'yes' || strVal === 'y' || strVal === '1') return 1;
+        if (strVal === 'false' || strVal === 'no' || strVal === 'n' || strVal === '0') return 0;
         const parsed = parseInt(strVal, 10);
-        return isNaN(parsed) ? 0 : parsed;
+        return isNaN(parsed) ? 0 : parsed > 0 ? 1 : 0;
     }
     return 0;
 }
 
+function fixWorksheetRef(worksheet: any) {
+    if (!worksheet['!ref']) return;
+    let maxRow = 0;
+    let maxCol = 0;
+    if (worksheet['!data']) {
+        worksheet['!data'].forEach((row: any, r: number) => {
+            if (!row) return;
+            if (r > maxRow) maxRow = r;
+            row.forEach((cell: any, c: number) => {
+                if (cell && c > maxCol) maxCol = c;
+            });
+        });
+    } else {
+        for (const key in worksheet) {
+            if (key.startsWith('!')) continue;
+            const cell = XLSX.utils.decode_cell(key);
+            if (cell.r > maxRow) maxRow = cell.r;
+            if (cell.c > maxCol) maxCol = cell.c;
+        }
+    }
+    const currentRange = XLSX.utils.decode_range(worksheet['!ref']);
+    if (maxRow > currentRange.e.r || maxCol > currentRange.e.c) {
+        worksheet['!ref'] = XLSX.utils.encode_range({
+            s: { r: 0, c: 0 },
+            e: { r: Math.max(maxRow, currentRange.e.r), c: Math.max(maxCol, currentRange.e.c) }
+        });
+    }
+}
+
 function getHeadersAndDataStart(worksheet: any, keywords: string[], skipRowsAfterHeader: number = 0): { headers: string[], headerRowIndex: number, dataStartIndex: number } {
     let rawData: any[][] = [];
-    if (worksheet['!ref']) {
-        const range = XLSX.utils.decode_range(worksheet['!ref']);
-        const detectionRange = { s: { r: 0, c: 0 }, e: { r: Math.min(range.e.r, 100), c: range.e.c } };
-        rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false, range: detectionRange });
-    } else {
-        rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false });
-    }
+    
+    // Ensure we read enough columns, sometimes !ref is truncated
+    let rangeObj = worksheet['!ref'] ? XLSX.utils.decode_range(worksheet['!ref']) : { s: { r: 0, c: 0 }, e: { r: 100, c: 100 } };
+    rangeObj.e.r = Math.min(rangeObj.e.r, 200); // Check up to 200 rows for header
+    rangeObj.e.c = Math.max(rangeObj.e.c, 100); // Force at least 100 columns to avoid truncation
+    
+    rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false, range: rangeObj });
 
     let headerRowIndex = -1;
     const searchKeywords = [...keywords, ...ADDITIONAL_HEADERS_KEYWORDS];
@@ -114,7 +170,26 @@ function getHeadersAndDataStart(worksheet: any, keywords: string[], skipRowsAfte
     
     if (headerRowIndex === -1) return { headers: [], headerRowIndex: -1, dataStartIndex: -1 };
 
-    const headers = rawData[headerRowIndex].map(h => String(h || '').trim());
+    let headers = rawData[headerRowIndex].map(h => String(h || '').trim());
+    
+    // Trim trailing empty headers
+    while (headers.length > 0 && headers[headers.length - 1] === '') {
+        headers.pop();
+    }
+    
+    // Ensure unique headers (sheet_to_json overwrites if keys are identical)
+    const seen = new Set<string>();
+    headers = headers.map((h, i) => {
+        let key = h === '' ? `__EMPTY_${i}` : h;
+        let counter = 1;
+        while (seen.has(key)) {
+            key = `${h === '' ? `__EMPTY_${i}` : h}_${counter}`;
+            counter++;
+        }
+        seen.add(key);
+        return key;
+    });
+
     let dataStartIndex = headerRowIndex + 1 + skipRowsAfterHeader;
 
     if (skipRowsAfterHeader === 0) {
@@ -213,14 +288,17 @@ async function processStoresFile(workbook: any, sheetName: string, updateStatus:
         if (signal?.aborted) throw new Error('Processing cancelled by user');
         const rowObject = df_template[i];
         
+        const inShelfValue = rowObject['In Shelf'] ?? rowObject['In Shelf?'];
+        const openDateValue = rowObject['Open Date'] ?? rowObject['Open date'] ?? rowObject['open date'];
+        
         storesData.push({
             store_uid: rowObject['Store UID*'],
             name: rowObject['Store name*'],
             region: rowObject['Region'],
             group_name: rowObject['Group name'],
             floor_space: parseInt(String(rowObject['Square']), 10) || 0,
-            in_shelf: parseInt(String(rowObject['In Shelf?']), 10) || 0,
-            licence_start_date: '2023-01-01',
+            in_shelf: parseInt(String(inShelfValue), 10) || 0,
+            licence_start_date: parseExcelDate(openDateValue) || '2023-01-01',
             is_deleted: getIsDeletedValue(rowObject),
         });
 
@@ -230,7 +308,7 @@ async function processStoresFile(workbook: any, sheetName: string, updateStatus:
         }
     }
 
-    const filteredStoresData = storesData.filter(row => row.store_uid);
+    const filteredStoresData = storesData.filter(row => row.store_uid !== null && row.store_uid !== undefined && String(row.store_uid).trim() !== '');
 
     if (filteredStoresData.length === 0) {
         updateStatus({ message: 'No valid data rows found in Stores file, skipping CSV generation.', status: 'success', progress: 100 });
@@ -285,7 +363,8 @@ async function processStoreItemsFile(workbook: any, sheetName: string, updateSta
         const storeUid = rowObject['Store UID*'];
         const itemUid = rowObject['Product UID*'];
 
-        if (storeUid && itemUid) {
+        if (storeUid !== null && storeUid !== undefined && String(storeUid).trim() !== '' &&
+            itemUid !== null && itemUid !== undefined && String(itemUid).trim() !== '') {
             itemsData.push({
                 store_uid: storeUid,
                 item_uid: itemUid,
@@ -377,26 +456,7 @@ async function processFactsFile(workbook: any, sheetName: string, updateStatus: 
         if (signal?.aborted) throw new Error('Processing cancelled by user');
         const rowObject = df_template[i];
 
-        let formattedDate: string | null = null;
-        const dateValue = rowObject['Date*'];
-
-        if (dateValue) {
-            let jsDate: Date | null = null;
-            if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
-                jsDate = dateValue;
-            } else if (typeof dateValue === 'number' && dateValue > 1) {
-                jsDate = excelSerialDateToJSDate(dateValue);
-            } else {
-                const d = new Date(String(dateValue));
-                if (!isNaN(d.getTime())) {
-                    jsDate = d;
-                }
-            }
-            
-            if (jsDate) {
-                formattedDate = formatDateToYYYYMMDD(jsDate);
-            }
-        }
+        const formattedDate = parseExcelDate(rowObject['Date*']);
 
         factsData.push({
             item_uid: rowObject['Product UID*'],
@@ -414,7 +474,11 @@ async function processFactsFile(workbook: any, sheetName: string, updateStatus: 
         }
     }
 
-    const filteredFactsData = factsData.filter(row => row.item_uid && row.store_uid && row.date);
+    const filteredFactsData = factsData.filter(row => 
+        row.item_uid !== null && row.item_uid !== undefined && String(row.item_uid).trim() !== '' &&
+        row.store_uid !== null && row.store_uid !== undefined && String(row.store_uid).trim() !== '' &&
+        row.date !== null && row.date !== undefined && String(row.date).trim() !== ''
+    );
     
     if (filteredFactsData.length === 0) {
         updateStatus({ message: 'No valid data rows found in Facts file, skipping CSV generation.', status: 'success', progress: 100 });
@@ -831,7 +895,7 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
             }
         }
 
-        if (newRow.item_uid && newRow.name) {
+        if (newRow.item_uid !== null && newRow.item_uid !== undefined && String(newRow.item_uid).trim() !== '') {
             df_masteritems.push(newRow);
         }
         if (i % 1000 === 0) await yieldToUI();
@@ -1044,7 +1108,10 @@ async function processStockFile(workbook: any, sheetName: string, updateStatus: 
         }
     }
 
-    const filteredStockData = stockData.filter(row => row.item_uid && row.store_uid);
+    const filteredStockData = stockData.filter(row => 
+        row.item_uid !== null && row.item_uid !== undefined && String(row.item_uid).trim() !== '' &&
+        row.store_uid !== null && row.store_uid !== undefined && String(row.store_uid).trim() !== ''
+    );
     
     if (filteredStockData.length === 0) {
         updateStatus({ message: 'No valid data rows found in Stock file, skipping CSV generation.', status: 'success', progress: 100 });
@@ -1103,7 +1170,10 @@ async function processPriceFile(workbook: any, sheetName: string, updateStatus: 
         }
     }
 
-    const filteredPriceData = priceData.filter(row => row.item_uid && row.price_list);
+    const filteredPriceData = priceData.filter(row => 
+        row.item_uid !== null && row.item_uid !== undefined && String(row.item_uid).trim() !== '' &&
+        row.price_list !== null && row.price_list !== undefined && String(row.price_list).trim() !== ''
+    );
     
     if (filteredPriceData.length === 0) {
         updateStatus({ message: 'No valid data rows found in Price file, skipping CSV generation.', status: 'success', progress: 100 });
@@ -1144,7 +1214,7 @@ export const generateCsvsFromExcel = async (
     const data = await file.arrayBuffer();
     if (signal?.aborted) throw new Error('Processing cancelled by user');
     // cellNF: true and cellText: true are crucial for preserving formatted values (like leading zeros)
-    const readOptions: any = { cellDates: true, cellNF: true, cellText: true, dense: true };
+    const readOptions: any = { cellDates: true, cellNF: true, cellText: true };
     if (isDetectionOnly) {
         readOptions.sheetRows = 100; // Read a bit more for safer detection
     }
@@ -1158,9 +1228,12 @@ export const generateCsvsFromExcel = async (
         throw new Error('Unknown file type. The file does not match any known templates.');
     }
 
+    const worksheet = workbook.Sheets[sheetName];
+    fixWorksheetRef(worksheet);
+
     const definition = FILE_TYPE_DEFINITIONS[detectedType as keyof typeof FILE_TYPE_DEFINITIONS];
     const skipRows = detectedType === 'ITEM_MASTER_UPDATED' ? 1 : 0;
-    const headersInfo = definition ? getHeadersAndDataStart(workbook.Sheets[sheetName], definition.keywords, skipRows) : { headers: [], headerRowIndex: -1, dataStartIndex: -1 };
+    const headersInfo = definition ? getHeadersAndDataStart(worksheet, definition.keywords, skipRows) : { headers: [], headerRowIndex: -1, dataStartIndex: -1 };
     const headers = headersInfo.headers;
     
     let csvFiles: CsvFile[] = [];
