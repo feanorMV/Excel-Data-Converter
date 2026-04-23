@@ -97,23 +97,43 @@ function parseExcelDate(dateValue: any): string | null {
 
 const ADDITIONAL_HEADERS_KEYWORDS = Array.from({ length: 20 }, (_, i) => [`Add ${i + 1}`, `additional_${i + 1}`]).flat();
 
-function getIsDeletedValue(row: any): number {
-    let val: any = null;
+function getValueByPossibleKeys(row: any, keywords: string[]): any {
+    const normalizedKeywords = keywords.map(kw => kw.toLowerCase().replace(/[^a-z0-9]/g, ''));
     
+    // 1. Exact match among normalized keys
     for (const key of Object.keys(row)) {
         const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (['deleted', 'isdeleted', 'todelete', 'delete'].includes(normalizedKey)) {
-            val = row[key];
-            break;
+        if (normalizedKeywords.includes(normalizedKey)) {
+            return row[key];
         }
     }
+    
+    // 2. Partial match (if a key contains one of our keywords)
+    for (const key of Object.keys(row)) {
+        const lowerKey = key.toLowerCase();
+        if (keywords.some(kw => lowerKey.includes(kw.toLowerCase()))) {
+            return row[key];
+        }
+    }
+    
+    return null;
+}
 
+function getIsDeletedValue(row: any): number {
+    // Try explicit keys using our flexible helper
+    const val = getValueByPossibleKeys(row, ['is_deleted', 'isDeleted', 'Deleted', 'To Delete', 'Removed', 'Inactive', 'del']);
+    
     if (val !== undefined && val !== null && String(val).trim() !== '') {
         if (typeof val === 'boolean') return val ? 1 : 0;
         const strVal = String(val).toLowerCase().trim();
-        if (strVal === 'true' || strVal === 'yes' || strVal === 'y' || strVal === '1') return 1;
-        if (strVal === 'false' || strVal === 'no' || strVal === 'n' || strVal === '0') return 0;
-        const parsed = parseInt(strVal, 10);
+        if (['true', 'yes', 'y', '1', '1.0', 'active', 'deleted', 'yes', 'tak', 'так'].includes(strVal)) {
+            // Some systems use "Deleted" as a status, we need to be careful. 
+            // Usually 1 means deleted.
+            return 1;
+        }
+        if (['false', 'no', 'n', '0', '0.0', 'not deleted', 'nie', 'ні'].includes(strVal)) return 0;
+        
+        const parsed = parseInt(strVal.split('.')[0], 10);
         return isNaN(parsed) ? 0 : parsed > 0 ? 1 : 0;
     }
     return 0;
@@ -153,8 +173,8 @@ function getHeadersAndDataStart(worksheet: any, keywords: string[], skipRowsAfte
     
     // Ensure we read enough columns, sometimes !ref is truncated
     let rangeObj = worksheet['!ref'] ? XLSX.utils.decode_range(worksheet['!ref']) : { s: { r: 0, c: 0 }, e: { r: 100, c: 100 } };
-    rangeObj.e.r = Math.min(rangeObj.e.r, 200); // Check up to 200 rows for header
-    rangeObj.e.c = Math.max(rangeObj.e.c, 100); // Force at least 100 columns to avoid truncation
+    rangeObj.e.r = Math.max(rangeObj.e.r, 500); // Check enough rows for header
+    rangeObj.e.c = Math.max(rangeObj.e.c, 1000); // Force at least 1000 columns to avoid truncation
     
     rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false, range: rangeObj });
 
@@ -371,7 +391,8 @@ async function processStoreItemsFile(workbook: any, sheetName: string, updateSta
                 is_active_planogram: parseInt(String(rowObject['In assortment?']), 10) || 0,
                 purchase_price: parseFloat(String(rowObject['Purchase price'] || '0').replace(',', '.')) || null,
                 retail_price: parseFloat(String(rowObject['Sale price'] || '0').replace(',', '.')) || null,
-                external_supplier_uid: rowObject['Supplier UID']
+                external_supplier_uid: rowObject['Supplier UID'],
+                is_deleted: getIsDeletedValue(rowObject)
             });
 
             const supplierUid = rowObject['Supplier UID'];
@@ -379,7 +400,7 @@ async function processStoreItemsFile(workbook: any, sheetName: string, updateSta
                 suppliersMap.set(String(supplierUid), {
                     supplier_uid: supplierUid,
                     name: rowObject['Supplier'],
-                    is_deleted: 0
+                    is_deleted: getIsDeletedValue(rowObject)
                 });
             }
         }
@@ -403,7 +424,7 @@ async function processStoreItemsFile(workbook: any, sheetName: string, updateSta
         rowCount: itemsData.length,
         content: await arrayToCsv(
             itemsData, 
-            ['item_uid', 'store_uid', 'is_active_planogram', 'purchase_price', 'retail_price', 'external_supplier_uid'], 
+            ['item_uid', 'store_uid', 'is_active_planogram', 'purchase_price', 'retail_price', 'external_supplier_uid', 'is_deleted'], 
             selectedColumns,
             (p) => updateStatus({ message: 'Generating Items CSV...', status: 'processing', progress: 50 + Math.round(p / 4) }),
             signal,
@@ -466,6 +487,7 @@ async function processFactsFile(workbook: any, sheetName: string, updateStatus: 
             sold_qty: parseFloat(String(rowObject['Out sale'] || '0').replace(',', '.')) || null,
             revenue: parseFloat(String(rowObject['Revenue'] || '0').replace(',', '.')) || null,
             cogs: parseFloat(String(rowObject['COGS'] || '0').replace(',', '.')) || null,
+            is_deleted: getIsDeletedValue(rowObject),
         });
 
         if (i % 1000 === 0) {
@@ -491,7 +513,7 @@ async function processFactsFile(workbook: any, sheetName: string, updateStatus: 
         rowCount: filteredFactsData.length,
         content: await arrayToCsv(
             filteredFactsData, 
-            ["item_uid", "store_uid", "date", "stock", "sold_qty", "revenue", "cogs"], 
+            ["item_uid", "store_uid", "date", "stock", "sold_qty", "revenue", "cogs", "is_deleted"], 
             selectedColumns,
             (p) => updateStatus({ message: 'Generating Facts CSV...', status: 'processing', progress: 50 + Math.round(p / 2) }),
             signal,
@@ -530,29 +552,30 @@ async function processItemMasterFile(workbook: any, sheetName: string, updateSta
 
     for (let i = 0; i < df_template.length; i++) {
         const row = df_template[i];
-        const uidValue = row['UID*'];
+        const uidValue = getValueByPossibleKeys(row, ['UID', 'UID*', 'item_uid', 'ID']);
         if (uidValue !== null && uidValue !== undefined) {
             const uid = String(uidValue).trim();
             if (uid !== '') {
-                let main_unit_uid = row['Main Unit UID'];
+                const unitVal = getValueByPossibleKeys(row, ['Unit', 'UOM']);
+                let main_unit_uid = getValueByPossibleKeys(row, ['Main Unit UID']);
                 if (main_unit_uid === null || main_unit_uid === undefined || String(main_unit_uid).trim() === '') {
-                    const unitName = row['Unit'];
-                    if (unitName && String(unitName).trim()) {
-                        main_unit_uid = `${uid}_${String(unitName).trim()}`;
+                    if (unitVal && String(unitVal).trim()) {
+                        main_unit_uid = `${uid}_${String(unitVal).trim()}`;
                     } else {
                         main_unit_uid = `${uid}_01`;
                     }
                 }
 
+                const isDel = getIsDeletedValue(row);
                 if (!seenUids.has(uid)) {
                     const getAdd = (num: number) => row[`Add ${num}`] ?? row[`additional_${num}`];
                     masteritemsData.push({ 
                         item_uid: uid, 
-                        name: row['Product name*'], 
-                        manufacturer_uid: row['Manufacturer'], 
-                        brand_uid: row['Brand'], 
-                        is_fractional: row['Is fractional?'] ? parseInt(String(row['Is fractional?']), 10) || 0 : 0, 
-                        is_deleted: getIsDeletedValue(row),
+                        name: getValueByPossibleKeys(row, ['Product name', 'Product name*', 'Name']), 
+                        manufacturer_uid: getValueByPossibleKeys(row, ['Manufacturer']), 
+                        brand_uid: getValueByPossibleKeys(row, ['Brand']), 
+                        is_fractional: getValueByPossibleKeys(row, ['Is fractional?']) ? parseInt(String(getValueByPossibleKeys(row, ['Is fractional?'])), 10) || 0 : 0, 
+                        is_deleted: isDel,
                         additional_1: row['Segment Description'] ?? getAdd(1), 
                         additional_2: row['Family Description'] ?? getAdd(2), 
                         additional_3: row['Class Description'] ?? getAdd(3), 
@@ -562,13 +585,40 @@ async function processItemMasterFile(workbook: any, sheetName: string, updateSta
                         additional_13: getAdd(13), additional_14: getAdd(14), additional_15: getAdd(15), additional_16: getAdd(16),
                         additional_17: getAdd(17), additional_18: getAdd(18), additional_19: getAdd(19), additional_20: getAdd(20),
                         main_unit_uid: main_unit_uid, 
-                        erp_category_uid: row['Brick Code'], 
+                        erp_category_uid: getValueByPossibleKeys(row, ['Brick Code', 'Category Code']), 
                     });
                     seenUids.add(uid);
+                } else if (isDel === 1) {
+                    const existing = masteritemsData.find(item => item.item_uid === uid);
+                    if (existing) existing.is_deleted = 1;
                 }
-                if (row['Barcode']) barcodesData.push({ item_uid: uid, barcode: row['Barcode'], is_main: 1 });
-                if (row['Brand']) seenBrands.add(String(row['Brand']));
-                if (row['Unit']) dimensionsData.push({ item_uid: uid, unit_name: row['Unit'], width: parseFloat(String(row['Width'] || '').replace(',', '.')) || 0, height: parseFloat(String(row['Height'] || '').replace(',', '.')) || 0, depth: parseFloat(String(row['Length'] || '').replace(',', '.')) || 0, netweight: parseFloat(String(row['Netweight'] || '').replace(',', '.')) || null, volume: parseFloat(String(row['Volume'] || '').replace(',', '.')) || null, dimension_uid: main_unit_uid, coef: 1, is_deleted: 0, });
+                
+                const barcode = getValueByPossibleKeys(row, ['Barcode', 'EAN']);
+                if (barcode) barcodesData.push({ item_uid: uid, barcode: barcode, is_main: 1 });
+                
+                const brand = getValueByPossibleKeys(row, ['Brand']);
+                if (brand) seenBrands.add(String(brand));
+                
+                if (unitVal) {
+                    const widthVal = getValueByPossibleKeys(row, ['Width', 'W (cm)']);
+                    const heightVal = getValueByPossibleKeys(row, ['Height', 'H (cm)']);
+                    const depthVal = getValueByPossibleKeys(row, ['Length', 'Depth', 'L (cm)', 'D (cm)']);
+                    const weightVal = getValueByPossibleKeys(row, ['Netweight', 'Weight', 'Net weight']);
+                    const volumeVal = getValueByPossibleKeys(row, ['Volume']);
+
+                    dimensionsData.push({ 
+                        item_uid: uid, 
+                        unit_name: unitVal, 
+                        width: widthVal !== null ? parseFloat(String(widthVal).replace(',', '.')) || 0 : 0, 
+                        height: heightVal !== null ? parseFloat(String(heightVal).replace(',', '.')) || 0 : 0, 
+                        depth: depthVal !== null ? parseFloat(String(depthVal).replace(',', '.')) || 0 : 0, 
+                        netweight: weightVal !== null ? parseFloat(String(weightVal).replace(',', '.')) || null : null, 
+                        volume: volumeVal !== null ? parseFloat(String(volumeVal).replace(',', '.')) || null : null, 
+                        dimension_uid: main_unit_uid, 
+                        coef: 1, 
+                        is_deleted: isDel, 
+                    });
+                }
                 Object.values(levelMapping).forEach((levelName, index) => {
                     const uidCol = `${levelName} Code`, nameCol = `${levelName} Description`, catUid = row[uidCol];
                     if (catUid && !seenErpCategories.has(String(catUid))) {
@@ -576,7 +626,8 @@ async function processItemMasterFile(workbook: any, sheetName: string, updateSta
                         seenErpCategories.set(String(catUid), { erp_category_uid: catUid, name: row[nameCol], parent_category_uid: parentUidCol ? row[parentUidCol] : null, });
                     }
                 });
-                if (row['Manufacturer']) seenManufacturers.add(String(row['Manufacturer']));
+                const manufacturer = getValueByPossibleKeys(row, ['Manufacturer']);
+                if (manufacturer) seenManufacturers.add(String(manufacturer));
             }
         }
         if (i % 1000 === 0) {
@@ -653,36 +704,39 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
 
     for (let i = 0; i < df_template.length; i++) {
         const row = df_template[i];
-        const item_uid = String(row['UID*']);
+        const uidVal = getValueByPossibleKeys(row, ['UID*', 'UID', 'item_uid', 'ID']);
+        const item_uid = uidVal !== null ? String(uidVal).trim() : '';
+        if (!item_uid) continue;
         
         let erpCategoryUid: string | number | Date | null = null;
         for (let j = 6; j >= 1; j--) {
             const catUidCol = `Category level ${j} UID`;
             const catNameCol = `Category level ${j}`;
-            const uidVal = row[catUidCol];
-            const nameVal = row[catNameCol];
+            const uidValSearch = row[catUidCol];
+            const nameValSearch = row[catNameCol];
             
-            if (uidVal !== null && uidVal !== undefined && String(uidVal).trim() !== '') {
-                erpCategoryUid = uidVal;
+            if (uidValSearch !== null && uidValSearch !== undefined && String(uidValSearch).trim() !== '') {
+                erpCategoryUid = uidValSearch;
                 break;
-            } else if (nameVal !== null && nameVal !== undefined && String(nameVal).trim() !== '') {
-                erpCategoryUid = nameVal;
+            } else if (nameValSearch !== null && nameValSearch !== undefined && String(nameValSearch).trim() !== '') {
+                erpCategoryUid = nameValSearch;
                 break;
             }
         }
 
-        let main_unit_uid = row['Main Unit UID'] || row['Main unit UID'];
+        const unitVal = getValueByPossibleKeys(row, ['Unit', 'UOM']);
+        const main_unit_uid_raw = getValueByPossibleKeys(row, ['Main Unit UID']);
+        let main_unit_uid = main_unit_uid_raw;
         if (main_unit_uid === null || main_unit_uid === undefined || String(main_unit_uid).trim() === '') {
-            const unitName = row['Unit'];
-            if (unitName && String(unitName).trim()) {
-                main_unit_uid = `${item_uid}_${String(unitName).trim()}`;
+            if (unitVal && String(unitVal).trim()) {
+                main_unit_uid = `${item_uid}_${String(unitVal).trim()}`;
             } else {
                 main_unit_uid = `${item_uid}_01`;
             }
         }
 
         const brandUidValue = row['Brand UID'];
-        const brandNameValue = row['Brand'];
+        const brandNameValue = getValueByPossibleKeys(row, ['Brand']);
         let effectiveBrandUid: string | number | Date | null = null;
         if (brandUidValue !== null && brandUidValue !== undefined && String(brandUidValue).trim() !== '') {
             effectiveBrandUid = brandUidValue;
@@ -690,8 +744,8 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
             effectiveBrandUid = brandNameValue;
         }
 
-        const manufUidValue = row['Manufacturer UID'];
-        const manufNameValue = row['Manufacturer'];
+        const manufUidValue = getValueByPossibleKeys(row, ['Manufacturer UID']);
+        const manufNameValue = getValueByPossibleKeys(row, ['Manufacturer']);
         let effectiveManufUid: string | number | Date | null = null;
         if (manufUidValue !== null && manufUidValue !== undefined && String(manufUidValue).trim() !== '') {
             effectiveManufUid = manufUidValue;
@@ -705,53 +759,74 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
             return val !== null && val !== undefined && String(val).trim() !== '' ? (parseFloat(String(val).replace(',', '.')) || null) : null;
         };
 
-        masteritemsData.push({
-            item_uid: item_uid, name: row['Product name*'], manufacturer_uid: effectiveManufUid, brand_uid: effectiveBrandUid,
-            is_fractional: parseInt(String(row['Is fractional?']), 10) || 0,
-            main_unit_uid: main_unit_uid, is_deleted: getIsDeletedValue(row),
-            additional_1: getFloatAddVal(row, 1),
-            additional_2: getAddVal(row, 2),
-            additional_3: getAddVal(row, 3),
-            additional_4: getAddVal(row, 4),
-            additional_5: getFloatAddVal(row, 5),
-            additional_6: getFloatAddVal(row, 6),
-            additional_7: getAddVal(row, 7),
-            additional_8: getFloatAddVal(row, 8),
-            additional_9: getFloatAddVal(row, 9),
-            additional_10: getFloatAddVal(row, 10),
-            additional_11: getFloatAddVal(row, 11),
-            additional_12: getFloatAddVal(row, 12),
-            additional_13: getFloatAddVal(row, 13),
-            additional_14: getFloatAddVal(row, 14),
-            additional_15: getFloatAddVal(row, 15),
-            additional_16: getFloatAddVal(row, 16),
-            additional_17: getFloatAddVal(row, 17),
-            additional_18: getFloatAddVal(row, 18),
-            additional_19: getFloatAddVal(row, 19),
-            additional_20: getFloatAddVal(row, 20),
-            erp_category_uid: erpCategoryUid
-        });
+        const isDel = getIsDeletedValue(row);
+        const existingIdx = masteritemsData.findIndex(r => String(r.item_uid).trim() === item_uid);
+        
+        if (existingIdx !== -1) {
+            if (isDel === 1) {
+                masteritemsData[existingIdx].is_deleted = 1;
+            }
+        } else {
+            masteritemsData.push({
+                item_uid: item_uid, 
+                name: getValueByPossibleKeys(row, ['Product name*', 'Product name', 'Name']), 
+                manufacturer_uid: effectiveManufUid, 
+                brand_uid: effectiveBrandUid,
+                is_fractional: getValueByPossibleKeys(row, ['Is fractional?']) ? parseInt(String(getValueByPossibleKeys(row, ['Is fractional?'])), 10) || 0 : 0,
+                main_unit_uid: main_unit_uid, is_deleted: isDel,
+                additional_1: getFloatAddVal(row, 1),
+                additional_2: getAddVal(row, 2),
+                additional_3: getAddVal(row, 3),
+                additional_4: getAddVal(row, 4),
+                additional_5: getFloatAddVal(row, 5),
+                additional_6: getFloatAddVal(row, 6),
+                additional_7: getAddVal(row, 7),
+                additional_8: getFloatAddVal(row, 8),
+                additional_9: getFloatAddVal(row, 9),
+                additional_10: getFloatAddVal(row, 10),
+                additional_11: getFloatAddVal(row, 11),
+                additional_12: getFloatAddVal(row, 12),
+                additional_13: getFloatAddVal(row, 13),
+                additional_14: getFloatAddVal(row, 14),
+                additional_15: getFloatAddVal(row, 15),
+                additional_16: getFloatAddVal(row, 16),
+                additional_17: getFloatAddVal(row, 17),
+                additional_18: getFloatAddVal(row, 18),
+                additional_19: getFloatAddVal(row, 19),
+                additional_20: getFloatAddVal(row, 20),
+                erp_category_uid: erpCategoryUid
+            });
+        }
 
-        if (row['Barcode']) barcodesData.push({ item_uid: item_uid, barcode: row['Barcode'], is_main: 1 });
+        const barcode = getValueByPossibleKeys(row, ['Barcode', 'EAN']);
+        if (barcode) barcodesData.push({ item_uid: item_uid, barcode: barcode, is_main: 1 });
 
         if (effectiveBrandUid !== null) {
             const key = String(effectiveBrandUid);
             if (!brandsMap.has(key)) {
                 brandsMap.set(key, { 
                     brand_uid: effectiveBrandUid, 
-                    name: brandNameValue || effectiveBrandUid, 
+                    name: String(brandNameValue || effectiveBrandUid), 
                     is_deleted: 0 
                 });
             }
         }
 
-        if (row['Unit']) {
+        if (unitVal) {
+            const widthVal = getValueByPossibleKeys(row, ['Width', 'W (cm)']);
+            const heightVal = getValueByPossibleKeys(row, ['Height', 'H (cm)']);
+            const depthVal = getValueByPossibleKeys(row, ['Depth', 'Depth (cm, in)', 'Length', 'D (cm)', 'L (cm)']);
+            const weightVal = getValueByPossibleKeys(row, ['Netweight', 'Weight', 'Net weight']);
+            const volumeVal = getValueByPossibleKeys(row, ['Volume']);
+
             dimensionsData.push({
-                item_uid: item_uid, unit_name: row['Unit'],
-                width: parseFloat((row['Width (cm, in)'] || '').toString().replace(',', '.')) || null,
-                height: parseFloat((row['Height (cm, in)'] || '').toString().replace(',', '.')) || null,
-                depth: parseFloat((row['Depth (cm, in)'] || '').toString().replace(',', '.')) || null,
-                coef: 1, is_deleted: 0, dimension_uid: main_unit_uid
+                item_uid: item_uid, unit_name: String(unitVal),
+                width: widthVal !== null ? parseFloat(String(widthVal).replace(',', '.')) || null : null,
+                height: heightVal !== null ? parseFloat(String(heightVal).replace(',', '.')) || null : null,
+                depth: depthVal !== null ? parseFloat(String(depthVal).replace(',', '.')) || null : null,
+                netweight: weightVal !== null ? parseFloat(String(weightVal).replace(',', '.')) || null : null,
+                volume: volumeVal !== null ? parseFloat(String(volumeVal).replace(',', '.')) || null : null,
+                coef: 1, is_deleted: isDel, dimension_uid: main_unit_uid
             });
         }
         
@@ -896,12 +971,21 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
         }
 
         if (newRow.item_uid !== null && newRow.item_uid !== undefined && String(newRow.item_uid).trim() !== '') {
-            df_masteritems.push(newRow);
+            const id = String(newRow.item_uid);
+            const existingIdx = df_masteritems.findIndex(r => String(r.item_uid) === id);
+            if (existingIdx !== -1) {
+                // If duplicate found, prioritize is_deleted: 1
+                if (newRow.is_deleted === 1) {
+                    df_masteritems[existingIdx].is_deleted = 1;
+                }
+            } else {
+                df_masteritems.push(newRow);
+            }
         }
         if (i % 1000 === 0) await yieldToUI();
     }
     
-    // drop duplicates
+    // Duplicates are now handled during collection to preserve is_deleted status
     const seenMasterItems = new Set<string>();
     df_masteritems = df_masteritems.filter(row => {
         const id = String(row.item_uid);
@@ -979,6 +1063,7 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
             if (signal?.aborted) throw new Error('Processing cancelled by user');
             const row = df_template[i];
             if (row['UID*'] && row['Unit']) {
+                const isDel = getIsDeletedValue(row);
                 const newRow: Record<string, any> = {
                     item_uid: row['UID*'],
                     unit_name: row['Unit'],
@@ -989,7 +1074,7 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
                     volume: row['Volume'],
                     dimension_uid: row['Main Unit UID'],
                     coef: 1,
-                    is_deleted: 0
+                    is_deleted: isDel
                 };
                 ['width', 'height', 'depth', 'netweight', 'volume'].forEach(col => {
                     if (newRow[col]) {
@@ -1100,6 +1185,7 @@ async function processStockFile(workbook: any, sheetName: string, updateStatus: 
             store_uid: rowObject['StoreID'],
             item_uid: rowObject['ItemUID'],
             stock: parseFloat(String(rowObject['Quantity'] || '0').replace(',', '.')) || null,
+            is_deleted: getIsDeletedValue(rowObject),
         });
 
         if (i % 1000 === 0) {
@@ -1124,7 +1210,7 @@ async function processStockFile(workbook: any, sheetName: string, updateStatus: 
         rowCount: filteredStockData.length,
         content: await arrayToCsv(
             filteredStockData, 
-            ["store_uid", "item_uid", "stock"], 
+            ["store_uid", "item_uid", "stock", "is_deleted"], 
             selectedColumns,
             (p) => updateStatus({ message: 'Generating Stock CSV...', status: 'processing', progress: 50 + Math.round(p / 2) }),
             signal,
@@ -1162,6 +1248,7 @@ async function processPriceFile(workbook: any, sheetName: string, updateStatus: 
             item_uid: rowObject['ItemUID'],
             price_list: rowObject['PriceList'],
             price: parseFloat(String(rowObject['Price'] || '0').replace(',', '.')) || null,
+            is_deleted: getIsDeletedValue(rowObject),
         });
 
         if (i % 1000 === 0) {
@@ -1186,7 +1273,7 @@ async function processPriceFile(workbook: any, sheetName: string, updateStatus: 
         rowCount: filteredPriceData.length,
         content: await arrayToCsv(
             filteredPriceData, 
-            ["item_uid", "price_list", "price"], 
+            ["item_uid", "price_list", "price", "is_deleted"], 
             selectedColumns,
             (p) => updateStatus({ message: 'Generating Price CSV...', status: 'processing', progress: 50 + Math.round(p / 2) }),
             signal,
