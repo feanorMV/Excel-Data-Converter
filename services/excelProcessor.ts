@@ -31,7 +31,10 @@ async function arrayToCsv(data: Record<string, any>[], columns: string[], select
         }
         return mappedCol;
     }).join(delimiter) + '\n';
-    let rows = '';
+    
+    // Memory optimization: Use an array for buffering and join at once.
+    // String concatenation (+=) in a loop causes memory spikes as strings are immutable.
+    const csvRows: string[] = [header];
     
     for (let i = 0; i < data.length; i++) {
         if (signal?.aborted) throw new Error('Processing cancelled by user');
@@ -48,7 +51,7 @@ async function arrayToCsv(data: Record<string, any>[], columns: string[], select
             return value;
         }).join(delimiter);
         
-        rows += rowContent + '\n';
+        csvRows.push(rowContent + '\n');
         
         if (i % 2000 === 0) {
             await yieldToUI();
@@ -57,7 +60,10 @@ async function arrayToCsv(data: Record<string, any>[], columns: string[], select
     }
     
     if (onProgress) onProgress(100);
-    return header + rows;
+    const result = csvRows.join('');
+    // Clear buffer reference early
+    csvRows.length = 0;
+    return result;
 }
 
 function excelSerialDateToJSDate(serial: number): Date {
