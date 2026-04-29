@@ -103,41 +103,68 @@ function parseExcelDate(dateValue: any): string | null {
 
 const ADDITIONAL_HEADERS_KEYWORDS = Array.from({ length: 20 }, (_, i) => [`Add ${i + 1}`, `additional_${i + 1}`]).flat();
 
+const globalMatchCache = new Map<string, string | null>();
+let globalLastKeysHash = "";
+
 function getValueByPossibleKeys(row: any, keywords: string[]): any {
+    const keys = Object.keys(row);
+    if (!keys.length) return null;
+    
+    // Quick signature for cache invalidation based on columns
+    const signature = keys.length + '|' + keys[0] + '|' + keys[keys.length - 1];
+    
+    if (signature !== globalLastKeysHash) {
+        globalMatchCache.clear();
+        globalLastKeysHash = signature;
+    }
+
+    const cacheKey = keywords.join('|');
+    if (globalMatchCache.has(cacheKey)) {
+        const matcheKeyName = globalMatchCache.get(cacheKey);
+        return matcheKeyName === null ? null : row[matcheKeyName];
+    }
+    
     const normalizedKeywords = keywords.map(kw => kw.toLowerCase().replace(/[^a-z0-9]/g, ''));
     
     // 1. Exact match among normalized keys
-    for (const key of Object.keys(row)) {
+    for (const key of keys) {
+        if (!key) continue;
         const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
         if (normalizedKeywords.includes(normalizedKey)) {
+            globalMatchCache.set(cacheKey, key);
             return row[key];
         }
     }
     
     // 2. Partial match (if a key contains one of our keywords)
-    for (const key of Object.keys(row)) {
-        const lowerKey = key.toLowerCase();
-        if (keywords.some(kw => lowerKey.includes(kw.toLowerCase()))) {
-            return row[key];
+    // We iterate over keywords first, so that we prioritize longer/more specific keywords
+    for (const kw of keywords) {
+        const lowerKw = kw.toLowerCase();
+        for (const key of keys) {
+            if (key && key.toLowerCase().includes(lowerKw)) {
+                globalMatchCache.set(cacheKey, key);
+                return row[key];
+            }
         }
     }
     
+    globalMatchCache.set(cacheKey, null);
     return null;
 }
 
 function getIsDeletedValue(row: any): number {
     // Try explicit keys using our flexible helper
-    const val = getValueByPossibleKeys(row, ['is_deleted', 'isDeleted', 'Deleted', 'To Delete', 'Removed', 'Inactive', 'del']);
+    const val = getValueByPossibleKeys(row, ['is_deleted', 'isDeleted', 'Deleted', 'delete', 'To Delete', 'Removed', 'Inactive']);
     
     if (val !== undefined && val !== null && String(val).trim() !== '') {
         if (typeof val === 'boolean') return val ? 1 : 0;
         const strVal = String(val).toLowerCase().trim();
-        if (['true', 'yes', 'y', '1', '1.0', 'active', 'deleted', 'yes', 'tak', 'так'].includes(strVal)) {
+        if (['true', 'yes', 'y', '1', '1.0', 'active', 'deleted', 'tak', 'так', 'inactive', 'removed', '+'].includes(strVal)) {
             // Some systems use "Deleted" as a status, we need to be careful. 
             // Usually 1 means deleted.
             return 1;
         }
-        if (['false', 'no', 'n', '0', '0.0', 'not deleted', 'nie', 'ні'].includes(strVal)) return 0;
+        if (['false', 'no', 'n', '0', '0.0', 'not deleted', 'nie', 'ні', '-'].includes(strVal)) return 0;
         
         const parsed = parseInt(strVal.split('.')[0], 10);
         return isNaN(parsed) ? 0 : parsed > 0 ? 1 : 0;
@@ -179,8 +206,8 @@ function getHeadersAndDataStart(worksheet: any, keywords: string[], skipRowsAfte
     
     // Ensure we read enough columns, sometimes !ref is truncated
     let rangeObj = worksheet['!ref'] ? XLSX.utils.decode_range(worksheet['!ref']) : { s: { r: 0, c: 0 }, e: { r: 100, c: 100 } };
-    rangeObj.e.r = Math.max(rangeObj.e.r, 500); // Check enough rows for header
-    rangeObj.e.c = Math.max(rangeObj.e.c, 1000); // Force at least 1000 columns to avoid truncation
+    rangeObj.e.r = Math.min(rangeObj.e.r, 500); // Only check up to 500 rows for header
+    rangeObj.e.c = Math.max(rangeObj.e.c, 100); // Ensure at least 100 columns are checked for header
     
     rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false, range: rangeObj });
 
@@ -605,16 +632,16 @@ async function processItemMasterFile(workbook: any, sheetName: string, updateSta
                 const brand = getValueByPossibleKeys(row, ['Brand']);
                 if (brand) seenBrands.add(String(brand));
                 
-                if (unitVal) {
-                    const widthVal = getValueByPossibleKeys(row, ['Width', 'W (cm)']);
-                    const heightVal = getValueByPossibleKeys(row, ['Height', 'H (cm)']);
-                    const depthVal = getValueByPossibleKeys(row, ['Length', 'Depth', 'L (cm)', 'D (cm)']);
-                    const weightVal = getValueByPossibleKeys(row, ['Netweight', 'Weight', 'Net weight']);
-                    const volumeVal = getValueByPossibleKeys(row, ['Volume']);
+                const widthVal = getValueByPossibleKeys(row, ['Width (cm, in)', 'Width', 'W (cm)', 'W(cm)']);
+                const heightVal = getValueByPossibleKeys(row, ['Height (cm, in)', 'Height', 'H (cm)', 'H(cm)']);
+                const depthVal = getValueByPossibleKeys(row, ['Depth (cm, in)', 'Length', 'Depth', 'L (cm)', 'D (cm)']);
+                const weightVal = getValueByPossibleKeys(row, ['Netweight', 'Weight', 'Net weight']);
+                const volumeVal = getValueByPossibleKeys(row, ['Volume']);
 
+                if (unitVal || widthVal !== null || heightVal !== null || depthVal !== null || weightVal !== null || volumeVal !== null) {
                     dimensionsData.push({ 
                         item_uid: uid, 
-                        unit_name: unitVal, 
+                        unit_name: unitVal ? String(unitVal) : 'Piece', // Default generic unit if blank
                         width: widthVal !== null ? parseFloat(String(widthVal).replace(',', '.')) || 0 : 0, 
                         height: heightVal !== null ? parseFloat(String(heightVal).replace(',', '.')) || 0 : 0, 
                         depth: depthVal !== null ? parseFloat(String(depthVal).replace(',', '.')) || 0 : 0, 
@@ -818,15 +845,15 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
             }
         }
 
-        if (unitVal) {
-            const widthVal = getValueByPossibleKeys(row, ['Width', 'W (cm)']);
-            const heightVal = getValueByPossibleKeys(row, ['Height', 'H (cm)']);
-            const depthVal = getValueByPossibleKeys(row, ['Depth', 'Depth (cm, in)', 'Length', 'D (cm)', 'L (cm)']);
-            const weightVal = getValueByPossibleKeys(row, ['Netweight', 'Weight', 'Net weight']);
-            const volumeVal = getValueByPossibleKeys(row, ['Volume']);
+        const widthVal = getValueByPossibleKeys(row, ['Width (cm, in)', 'Width', 'W (cm)', 'W(cm)']);
+        const heightVal = getValueByPossibleKeys(row, ['Height (cm, in)', 'Height', 'H (cm)', 'H(cm)']);
+        const depthVal = getValueByPossibleKeys(row, ['Depth (cm, in)', 'Depth', 'Length', 'D (cm)', 'L (cm)']);
+        const weightVal = getValueByPossibleKeys(row, ['Netweight', 'Weight', 'Net weight']);
+        const volumeVal = getValueByPossibleKeys(row, ['Volume']);
 
+        if (unitVal || widthVal !== null || heightVal !== null || depthVal !== null || weightVal !== null || volumeVal !== null) {
             dimensionsData.push({
-                item_uid: item_uid, unit_name: String(unitVal),
+                item_uid: item_uid, unit_name: unitVal ? String(unitVal) : 'Piece',
                 width: widthVal !== null ? parseFloat(String(widthVal).replace(',', '.')) || null : null,
                 height: heightVal !== null ? parseFloat(String(heightVal).replace(',', '.')) || null : null,
                 depth: depthVal !== null ? parseFloat(String(depthVal).replace(',', '.')) || null : null,
