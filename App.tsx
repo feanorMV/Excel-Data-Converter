@@ -75,7 +75,8 @@ export const App: React.FC = () => {
     const [selectedSolutions, setSelectedSolutions] = useState<Solution[]>(['shelf']);
     const [validationResults, setValidationResults] = useState<FileValidationResult[]>([]);
     const [expandedValidationFile, setExpandedValidationFile] = useState<string | null>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const filesInputRef = useRef<HTMLInputElement>(null);
+    const folderInputRef = useRef<HTMLInputElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
     const resetState = () => {
@@ -271,8 +272,11 @@ export const App: React.FC = () => {
     const handleReset = () => {
         setFileInfos([]);
         resetState();
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
+        if (filesInputRef.current) {
+            filesInputRef.current.value = '';
+        }
+        if (folderInputRef.current) {
+            folderInputRef.current.value = '';
         }
     };
 
@@ -325,7 +329,7 @@ export const App: React.FC = () => {
             <div className="w-full max-w-3xl mx-auto">
                     <header className="text-center mb-8">
                         <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary">Excel Data Converter</h1>
-                        <p className="mt-3 text-lg text-gray-600">Select a folder to convert all valid template files into a structured CSV archive.</p>
+                        <p className="mt-3 text-lg text-gray-600">Select individual files or a whole folder to convert into a structured CSV archive.</p>
                         
                         {processingState === 'processing' && (
                             <div className="mt-6 max-w-md mx-auto">
@@ -347,14 +351,34 @@ export const App: React.FC = () => {
                     {fileInfos.length === 0 ? (
                          <div
                             className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center cursor-pointer hover:border-primary transition-all duration-300 group"
-                            onClick={() => fileInputRef.current?.click()}
+                            onClick={() => filesInputRef.current?.click()}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => { e.preventDefault(); handleFilesChange(e.dataTransfer.files); }}
                         >
                             <FolderUp className="mx-auto h-12 w-12 text-gray-400 group-hover:text-primary transition-colors duration-300" />
-                            <p className="mt-2 font-semibold text-primary">Click to select a folder</p>
-                            <p className="text-sm text-gray-500">All .xlsx and .xls files will be processed</p>
+                            <p className="mt-2 font-semibold text-primary">Click to select files, or drag & drop</p>
+                            <p className="text-sm text-gray-500">Pick one or more .xlsx / .xls files</p>
+                            <p className="text-sm text-gray-400 mt-2">
+                                or{' '}
+                                <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}
+                                    className="text-primary underline hover:no-underline"
+                                >
+                                    select a whole folder
+                                </button>
+                            </p>
                             <input
                                 type="file"
-                                ref={fileInputRef}
+                                ref={filesInputRef}
+                                onChange={(e) => handleFilesChange(e.target.files)}
+                                className="hidden"
+                                multiple
+                                accept=".xlsx,.xls"
+                            />
+                            <input
+                                type="file"
+                                ref={folderInputRef}
                                 onChange={(e) => handleFilesChange(e.target.files)}
                                 className="hidden"
                                 webkitdirectory=""
