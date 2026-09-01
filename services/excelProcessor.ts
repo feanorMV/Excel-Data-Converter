@@ -45,7 +45,7 @@ async function arrayToCsv(data: Record<string, any>[], columns: string[], select
                 return '';
             }
             value = String(value);
-            if (value.includes('"') || value.includes(delimiter)) {
+            if (value.includes('"') || value.includes(delimiter) || value.includes('\n') || value.includes('\r')) {
                 return `"${value.replace(/"/g, '""')}"`;
             }
             return value;
@@ -734,26 +734,57 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
 
     const masteritemsData: any[] = [], barcodesData: any[] = [], dimensionsData: any[] = [];
     const brandsMap = new Map<string, any>(), manufacturersMap = new Map<string, any>(), erpCategoriesMap = new Map<string, any>();
+    let categoryCollisionCount = 0;
 
     for (let i = 0; i < df_template.length; i++) {
         const row = df_template[i];
         const uidVal = getValueByPossibleKeys(row, ['UID*', 'UID', 'item_uid', 'ID']);
         const item_uid = uidVal !== null ? String(uidVal).trim() : '';
         if (!item_uid) continue;
-        
+
+        // Walk the category tree first so the item's own erp_category_uid always
+        // matches whatever id (plain or collision-disambiguated) ends up in erpcategories.csv.
         let erpCategoryUid: string | number | Date | null = null;
-        for (let j = 6; j >= 1; j--) {
-            const catUidCol = `Category level ${j} UID`;
-            const catNameCol = `Category level ${j}`;
-            const uidValSearch = row[catUidCol];
-            const nameValSearch = row[catNameCol];
-            
-            if (uidValSearch !== null && uidValSearch !== undefined && String(uidValSearch).trim() !== '') {
-                erpCategoryUid = uidValSearch;
-                break;
-            } else if (nameValSearch !== null && nameValSearch !== undefined && String(nameValSearch).trim() !== '') {
-                erpCategoryUid = nameValSearch;
-                break;
+        let previousLevelEffectiveUid: string | number | Date | null = null;
+        for (let level = 1; level <= 6; level++) {
+            const uidCol = `Category level ${level} UID`;
+            const nameCol = `Category level ${level}`;
+
+            const currentUidValue = row[uidCol];
+            const currentNameValue = row[nameCol];
+
+            let currentLevelEffectiveUid: string | number | Date | null = null;
+
+            if (currentUidValue !== null && currentUidValue !== undefined && String(currentUidValue).trim() !== '') {
+                currentLevelEffectiveUid = currentUidValue;
+            } else if (currentNameValue !== null && currentNameValue !== undefined && String(currentNameValue).trim() !== '') {
+                // No code supplied — fall back to the category name as the id.
+                // Only disambiguate with the parent name when the same leaf name
+                // is already claimed by a *different* parent (a real collision);
+                // otherwise keep the plain name so unaffected ids stay stable.
+                const bareKey = String(currentNameValue);
+                const existing = erpCategoriesMap.get(bareKey);
+                if (!existing || String(existing.parent_category_uid) === String(previousLevelEffectiveUid)) {
+                    currentLevelEffectiveUid = currentNameValue;
+                } else {
+                    currentLevelEffectiveUid = `${String(previousLevelEffectiveUid)}_${currentNameValue}`;
+                    categoryCollisionCount++;
+                }
+            }
+
+            if (currentLevelEffectiveUid !== null) {
+                const key = String(currentLevelEffectiveUid);
+                const existingEntry = erpCategoriesMap.get(key);
+
+                if (!existingEntry || (existingEntry.name === null && currentNameValue !== null)) {
+                    erpCategoriesMap.set(key, {
+                        erp_category_uid: currentLevelEffectiveUid,
+                        name: currentNameValue,
+                        parent_category_uid: previousLevelEffectiveUid
+                    });
+                }
+                previousLevelEffectiveUid = currentLevelEffectiveUid;
+                erpCategoryUid = currentLevelEffectiveUid;
             }
         }
 
@@ -862,38 +893,7 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
                 coef: 1, is_deleted: isDel, dimension_uid: main_unit_uid
             });
         }
-        
-        let previousLevelEffectiveUid: string | number | Date | null = null;
-        for (let level = 1; level <= 6; level++) {
-            const uidCol = `Category level ${level} UID`;
-            const nameCol = `Category level ${level}`;
-            
-            const currentUidValue = row[uidCol];
-            const currentNameValue = row[nameCol];
 
-            let currentLevelEffectiveUid: string | number | Date | null = null;
-            
-            if (currentUidValue !== null && currentUidValue !== undefined && String(currentUidValue).trim() !== '') {
-                currentLevelEffectiveUid = currentUidValue;
-            } else if (currentNameValue !== null && currentNameValue !== undefined && String(currentNameValue).trim() !== '') {
-                currentLevelEffectiveUid = currentNameValue;
-            }
-
-            if (currentLevelEffectiveUid !== null) {
-                const key = String(currentLevelEffectiveUid);
-                const existingEntry = erpCategoriesMap.get(key);
-                
-                if (!existingEntry || (existingEntry.name === null && currentNameValue !== null)) {
-                    erpCategoriesMap.set(key, {
-                        erp_category_uid: currentLevelEffectiveUid,
-                        name: currentNameValue,
-                        parent_category_uid: previousLevelEffectiveUid
-                    });
-                }
-                previousLevelEffectiveUid = currentLevelEffectiveUid;
-            }
-        }
-        
         if (effectiveManufUid !== null) {
             const key = String(effectiveManufUid);
             if (!manufacturersMap.has(key)) {
@@ -920,7 +920,10 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
     if((options.dimensions ?? true) && dimensionsData.length > 0) csvs.push({ name: `dimensions_${dateStr}.csv`, rowCount: dimensionsData.length, content: await arrayToCsv(dimensionsData, ['item_uid', 'unit_name', 'width', 'height', 'depth', 'coef', 'is_deleted', 'dimension_uid'], selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
     if ((options.erpcategories ?? true) && erpCategoriesMap.size > 0) csvs.push({ name: `erpcategories_${dateStr}.csv`, rowCount: erpCategoriesMap.size, content: await arrayToCsv(Array.from(erpCategoriesMap.values()), ['erp_category_uid', 'name', 'parent_category_uid'], selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
     if((options.manufacturers ?? true) && manufacturersMap.size > 0) csvs.push({ name: `manufacturers_${dateStr}.csv`, rowCount: manufacturersMap.size, content: await arrayToCsv(Array.from(manufacturersMap.values()), ['manufacturer_uid', 'name', 'is_deleted'], selectedColumns, undefined, signal, options.delimiter, options.columnMapping) });
-    
+
+    if (categoryCollisionCount > 0) {
+        updateStatus({ message: `Resolved ${categoryCollisionCount} category-name collision${categoryCollisionCount !== 1 ? 's' : ''} using parent-based fallback IDs (categories without a code from source that share a name with an unrelated category).`, status: 'success' });
+    }
     updateStatus({ message: 'New Masteritems processing complete.', status: 'success' });
     return csvs;
 }
