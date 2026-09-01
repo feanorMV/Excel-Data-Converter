@@ -65,3 +65,19 @@ export interface ProcessingStats {
   outputRows: Record<string, number>;
   warnings: ProcessingWarning[];
 }
+
+export type Solution = 'inventory' | 'shelf' | 'assortment';
+
+export interface ValidationError {
+  row: number;
+  field: string;
+  message: string;
+}
+
+export interface FileValidationResult {
+  filename: string;
+  schemaDetected: boolean;
+  errorCount: number;
+  errors: ValidationError[];
+  availableSolutions: Solution[];
+}

@@ -1,0 +1,435 @@
+{
+  "masteritems_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["item_uid"],
+      "columns": [
+              { "name": "item_uid", "type": "varchar", "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "name", "type": "varchar", "required": true, "solutions":["inventory","shelf","assortment"]  },
+              { "name": "erp_category_uid", "type": "varchar", "required": true, "solutions":["inventory","shelf"]  },
+              { "name": "altcategory_uid", "type": "varchar", "required": false, "solutions":["shelf"] },
+              { "name": "brand_uid", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "manufacturer_uid", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "main_unit_uid", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "order_unit_name", "type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "order_unit_volume", "type": "numeric", "min": 0, "required": false, "solutions":["inventory"]  },
+              { "name": "order_unit_weight", "type": "numeric", "min": 0, "required": false, "solutions":["inventory"]  },
+              { "name": "is_fractional", "type": "int","allowed_values": [0, 1], "required": true, "solutions":["shelf","assortment"] },
+              { "name": "is_outmover", "type": "int", "allowed_values": [0, 1], "required": true, "solutions":["inventory"]  },
+              { "name": "is_seasonal", "type": "int", "allowed_values": [0, 1], "required": false, "solutions":["inventory","assortment"]  },
+              { "name": "is_kvi", "type": "int", "allowed_values": [0, 1], "required": false, "solutions":["inventory","assortment"]  },
+              { "name": "is_fresh", "type": "int", "allowed_values": [0, 1], "required": false, "solutions":["inventory"]  },
+              { "name": "additional_1", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_2", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_3", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_4", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_5", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_6", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_7", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_8", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_9", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_10", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_11", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_12", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_13", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_14", "type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_15", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_16", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_17", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_18", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_19", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_20", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_21", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_22", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_23", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_24", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_25", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_26", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_27", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_28", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_29", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_30", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_31", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_32", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_33", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "additional_34", "type": "varchar", "required": false, "solutions":["shelf","assortment"] },
+              { "name": "is_deleted", "type": "int","allowed_values": [0, 1], "required": false, "solutions":["shelf","assortment"] },
+              { "name": "net_weight", "type": "numeric", "min": 0, "required": true, "solutions":["inventory"]  }
+      ]
+    },
+    "stores_.*.csv" : {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["store_uid"],
+      "columns": [
+              { "name": "store_uid","type": "varchar", "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "name", "type": "varchar", "required": true, "solutions":["inventory","shelf","assortment"]  },
+              { "name": "address", "type": "varchar", "required": true, "solutions":["inventory"]  },
+              { "name": "region","type": "varchar", "required": false, "solutions":["shelf","assortment"]  },
+              { "name": "group_name","type": "varchar", "required": false, "solutions":["inventory","shelf","assortment"] },
+              { "name": "latitude","type": "numeric", "required": true, "solutions":["inventory"]  },
+              { "name": "longitude","type": "numeric", "required": true, "solutions":["inventory"]  },
+              { "name": "floor_space", "type": "numeric", "min": 0, "required": false, "solutions":["shelf"]  },
+              { "name": "in_shelf", "type": "int","allowed_values": [0, 1], "required": true, "solutions":["shelf"] },
+              { "name": "open_date", "type": "date", "required": false, "format": "%Y-%m-%d","solutions":["inventory","assortment"]  },
+              { "name": "close_date", "type": "date", "required": false,"format": "%Y-%m-%d","solutions":["assortment"]  },
+              { "name": "licence_start_date","type": "date", "required": true,"format": "%Y-%m-%d","solutions":["shelf"]  },
+              { "name": "licence_end_date", "type": "date", "required": false,"format": "%Y-%m-%d","solutions":["shelf"]  },
+              { "name": "is_active", "type": "int", "allowed_values": [0, 1], "required": true, "solutions":["inventory"]  },
+              { "name": "is_dc", "type": "int", "allowed_values": [0, 1], "required": true, "solutions":["inventory","assortment"]  },
+              { "name": "is_deleted", "type": "int","allowed_values": [0, 1], "required": false, "solutions":["shelf","assortment"] }
+      ]
+    },
+    "dimensions_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["item_uid","dimension_uid"],
+      "columns": [
+              { "name": "item_uid","type": "varchar", "required": true, "solutions":["shelf","assortment"] },
+              { "name": "dimension_uid","type": "varchar", "required": true, "solutions":["shelf","assortment"] },
+              { "name": "unit_name","type": "varchar", "required": true, "solutions":["shelf","assortment"] },
+              { "name": "coef", "type": "numeric", "min": 0, "required": false, "solutions":["shelf"]  },
+              { "name": "width","type": "numeric", "min": 0, "required": true, "solutions":["shelf"]  },
+              { "name": "height","type": "numeric", "min": 0, "required": true, "solutions":["shelf"]  },
+              { "name": "depth","type": "numeric", "min": 0, "required": true, "solutions":["shelf"]  },
+              { "name": "netweight","type": "numeric", "min": 0, "required": false, "solutions":["shelf","assortment"] },
+              { "name": "volume","type": "numeric", "min": 0, "required": false, "solutions":["shelf","assortment"] },
+              { "name": "is_deleted", "type": "int","allowed_values": [0, 1], "required": false, "solutions":["shelf","assortment"] }
+      ]
+    },
+    "suppliers_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["supplier_uid"],
+      "columns": [
+              { "name": "supplier_uid","type": "varchar", "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "name", "type": "varchar", "required": true, "solutions":["inventory","shelf","assortment"]  },
+              { "name": "address","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "phones","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "emails","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "contact_person","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "entity", "type": "int","allowed_values": [0, 1], "required": false, "solutions":["shelf"] },
+              { "name": "group_uid","type": "varchar", "required": false, "solutions":["shelf"] },
+              { "name": "is_group","type": "int","allowed_values": [0, 1], "required": false, "solutions":["shelf"] },
+              { "name": "is_active","type": "int","allowed_values": [0, 1], "required": false, "solutions":["inventory"] },
+              { "name": "is_deleted", "type": "int","allowed_values": [0, 1], "required": false, "solutions":["shelf","assortment"] }
+      ]
+    },
+    "brands_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["brand_uid"],
+      "columns": [
+              { "name": "brand_uid","type": "varchar", "required": true, "solutions":["shelf","assortment"] },
+              { "name": "name", "type": "varchar", "required": true, "solutions":["shelf","assortment"]  },
+              { "name": "is_deleted", "type": "int","allowed_values": [0, 1], "required": false, "solutions":["shelf","assortment"] }
+      ]
+    },
+    "manufacturers_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["manufacturer_uid"],
+      "columns": [
+              { "name": "manufacturer_uid","type": "varchar", "required": true, "solutions":["shelf","assortment"] },
+              { "name": "name", "type": "varchar", "required": true, "solutions":["shelf","assortment"]  },
+              { "name": "is_deleted", "type": "int","allowed_values": [0, 1], "required": false, "solutions":["shelf","assortment"] }
+      ]
+    },
+    "barcodes_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["item_uid","barcode"],
+      "columns": [
+              { "name": "item_uid","type": "varchar", "required": true, "solutions":["shelf"] },
+              { "name": "barcode", "type": "varchar", "required": true, "solutions":["shelf"]  },
+              { "name": "is_main", "type": "int","allowed_values": [0, 1], "required": true, "solutions":["shelf"] }
+      ]
+    },
+    "erpcategories_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["erp_category_uid"],
+      "columns": [
+              { "name": "erp_category_uid","type": "varchar", "required": true, "solutions":["inventory","shelf"] },
+              { "name": "name", "type": "varchar", "required": true, "solutions":["inventory","shelf"]  },
+              { "name": "parent_category_uid","type": "varchar", "required": false, "solutions":["inventory","shelf"]  },
+              { "name": "is_deleted", "type": "int","allowed_values": [0, 1], "required": false, "solutions":["shelf"] }
+      ]
+    },
+    "altcategories_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["altcategory_uid"],
+      "columns": [
+              { "name": "altcategory_uid","type": "varchar", "required": true, "solutions":["shelf"] },
+              { "name": "name", "type": "varchar", "required": true, "solutions":["shelf"]  },
+              { "name": "parent_altcategory_uid","type": "varchar", "required": true, "solutions":["shelf"]  },
+              { "name": "is_group", "type": "int","allowed_values": [0, 1], "required": false, "solutions":["shelf"] },
+              { "name": "is_deleted", "type": "int","allowed_values": [0, 1], "required": false, "solutions":["shelf"] }
+      ]
+    },
+    "altunits_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["item_uid","store_uid","supplier_uid"],
+      "columns": [
+              { "name": "item_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "store_uid", "type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "supplier_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "unit_name","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "unit_ratio","type": "varchar", "required": true, "solutions":["inventory"] }
+      ]
+    },
+    "altitems_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["main_item_uid","params_item_uid","item_uid"],
+      "columns": [
+              { "name": "main_item_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "params_item_uid", "type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "item_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "order_priority","type": "varchar", "required": false, "solutions":["inventory"] }
+      ]
+    },
+    "similaritems_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["item_uid"],
+      "columns": [
+              { "name": "item_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "similar_item_uid", "type": "varchar", "required": true, "solutions":["inventory"] }
+      ]
+    },
+    "schedules_.*.csv":{
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["store_uid","supplier_uid"],
+      "columns": [
+              { "name": "store_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "supplier_uid", "type": "varchar", "required": true, "solutions":["inventory"]  },
+              { "name": "order_split_mark", "type": "varchar", "required": true, "solutions":["inventory"]  },
+              { "name": "is_active", "type": "int", "allowed_values": [0, 1], "required": false, "solutions":["inventory"]  },
+              { "name": "lead_time_mon", "type": "int", "allowed_values": [0, 1], "required": false, "solutions":["inventory"]  },
+              { "name": "lead_time_tue", "type": "int", "allowed_values": [0, 1], "required": false, "solutions":["inventory"]  },
+              { "name": "lead_time_wed", "type": "int", "allowed_values": [0, 1], "required": false, "solutions":["inventory"]  },
+              { "name": "lead_time_thu", "type": "int", "allowed_values": [0, 1], "required": false, "solutions":["inventory"]  },
+              { "name": "lead_time_fri", "type": "int", "allowed_values": [0, 1], "required": false, "solutions":["inventory"]  },
+              { "name": "lead_time_sat", "type": "int", "allowed_values": [0, 1], "required": false, "solutions":["inventory"]  },
+              { "name": "lead_time_sun", "type": "int", "allowed_values": [0, 1], "required": false, "solutions":["inventory"]  },
+              { "name": "periodicity", "type": "int", "allowed_values": [7,30], "required": true, "solutions":["inventory"]  },
+              { "name": "frequency", "type": "int", "allowed_values": [0, 1, 2], "required": false, "solutions":["inventory"]  },
+              { "name": "days_of_month" ,"type": "varchar", "required": false, "solutions":["inventory"]  },
+              { "name": "begin_date","type": "date", "required": false,"format": "%Y-%m-%d","solutions":["inventory"] },
+              { "name": "emails" ,"type": "varchar", "required": false, "solutions":["inventory"]  },
+              { "name": "time_until", "type": "time", "format": "%H%M","required": false,"solutions":["inventory"]  },
+              { "name": "auto_send", "type": "int","allowed_values": [0, 1], "required": false, "solutions":["inventory"]  },
+              { "name": "sending_slot", "type": "int",  "required": false, "solutions":["inventory"]  },
+              { "name": "delivery_slot", "type": "int",  "required": false, "solutions":["inventory"]  },
+              { "name": "comment" ,"type": "varchar", "required": false, "solutions":["inventory"]  }
+      ]
+    },
+    "items_.*.csv":{
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["store_uid","item_uid"],
+      "columns": [
+              { "name": "item_uid", "type": "varchar", "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "store_uid","type": "varchar", "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "is_active_order", "type": "int", "allowed_values": [0, 1], "required": true, "solutions":["inventory","assortment"] },
+              { "name": "is_active_planogram", "type": "int", "allowed_values": [0, 1], "required": true, "solutions":["shelf","assortment"] },
+              { "name": "item_status" ,"type": "varchar", "required": false, "solutions":["inventory"]  },
+              { "name": "purchase_price","type": "numeric", "min": 0, "required": true, "solutions":["inventory","shelf"] },
+              { "name": "retail_price","type": "numeric", "min": 0, "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "supplier_uid","type": "varchar", "required": true, "solutions":["inventory","assortment"] },
+              { "name": "supplier_item_id","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "supplier_item_name","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "moq","type": "numeric", "min": 0, "required": true, "solutions":["inventory"] },
+              { "name": "usq","type": "numeric", "min": 0, "required": true, "solutions":["inventory"] },
+              { "name": "order_split_mark","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "erp_user_uid","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "adu","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "buffer","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "max_buffer","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "min_buffer","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "safety_stock_1","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "safety_stock_2","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "safety_stock_3","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "safety_stock_4","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "safety_stock_5","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "max_shelf_stock", "type": "int", "required": false, "solutions":["inventory"] },
+              { "name": "rsl","type": "numeric", "min": 0, "required": true, "solutions":["inventory"] },
+              { "name": "in_transit_qty","type": "numeric", "min": 0, "required": true, "solutions":["assortment"] },
+              { "name": "item_additional_1", "type": "varchar", "required": false, "solutions":["inventory","shelf"] },
+              { "name": "item_additional_2", "type": "varchar", "required": false, "solutions":["inventory","shelf"] },
+              { "name": "item_additional_3", "type": "varchar", "required": false, "solutions":["inventory","shelf"] },
+              { "name": "item_additional_4", "type": "varchar", "required": false, "solutions":["inventory","shelf"] },
+              { "name": "item_additional_5", "type": "varchar", "required": false, "solutions":["shelf"] },
+              { "name": "item_additional_6", "type": "varchar", "required": false, "solutions":["shelf"] },
+              { "name": "item_additional_7", "type": "varchar", "required": false, "solutions":["shelf"] },
+              { "name": "item_additional_8", "type": "varchar", "required": false, "solutions":["shelf"] },
+              { "name": "additional_order","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "external_supplier_uid", "type": "varchar", "required": false, "solutions":["shelf","assortment"] }
+      ]
+    },
+    "facts_.*.csv":{
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["store_uid","item_uid","date"],
+      "columns": [
+              { "name": "item_uid", "type": "varchar", "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "store_uid","type": "varchar", "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "date", "type": "date", "required": true,"format": "%Y-%m-%d","solutions":["inventory","shelf","assortment"] },
+              { "name": "stock","type": "numeric", "min": 0, "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "sold_qty","type": "numeric", "min": 0, "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "sold_qty_markdown","type": "numeric", "min": 0, "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "delivered_qty","type": "numeric", "min": 0, "required": true, "solutions":["inventory","assortment"] },
+              { "name": "in_return","type": "numeric", "min": 0, "required": true, "solutions":["inventory","assortment"] },
+              { "name": "out_return","type": "numeric", "min": 0, "required": true, "solutions":["inventory","assortment"] },
+              { "name": "in_move","type": "numeric", "min": 0, "required": true, "solutions":["inventory","assortment"] },
+              { "name": "out_move","type": "numeric", "min": 0, "required": true, "solutions":["inventory","assortment"] },
+              { "name": "in_manufacture","type": "numeric", "min": 0, "required": true, "solutions":["inventory","assortment"] },
+              { "name": "out_manufacture","type": "numeric", "min": 0, "required": true, "solutions":["inventory","assortment"] },
+              { "name": "write_offs_qty","type": "numeric", "min": 0, "required": false, "solutions":["inventory","assortment"] },
+              { "name": "reserved_qty","type": "numeric", "min": 0, "required": true, "solutions":["inventory"] },
+              { "name": "revenue","type": "numeric", "min": 0, "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "cogs","type": "numeric", "min": 0, "required": true, "solutions":["inventory","shelf","assortment"] },
+              { "name": "additional_costs","type": "numeric", "min": 0, "required": false, "solutions":["assortment"] },
+              { "name": "is_promo_erp", "type": "int", "allowed_values": [0, 1], "required": true, "solutions":["inventory","assortment"] },
+              { "name": "stock_pp","type": "numeric", "min": 0, "required": false, "solutions":["assortment"] },
+              { "name": "back_margin","type": "numeric", "min": 0, "required": false, "solutions":["shelf","assortment"] }
+      ]
+    },
+    "invoices_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["item_uid","store_uid","supplier_uid"],
+      "columns": [
+              { "name": "item_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "store_uid", "type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "supplier_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "delivered_qty","type": "numeric", "min": 0, "required": false,"solutions":["inventory"] },
+              { "name": "order_number","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "invoice_uid","type": "varchar", "required": true, "solutions":["inventory"] }
+      ]
+    },
+    "orderclose_.*.csv":{
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["order_number"],
+      "columns": [
+              { "name": "order_number","type": "varchar", "required": true, "solutions":["inventory"] }
+      ]
+    },
+    "ordered_<order_number>_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["item_uid","store_uid","supplier_uid"],
+      "columns": [
+              { "name": "item_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "store_uid", "type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "supplier_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "ordered_qty","type": "numeric", "min": 0, "required": false,"solutions":["inventory"] },
+              { "name": "order_number","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "delivery_date","type": "date", "required": false,"format": "%Y-%m-%d","solutions":["inventory"] }
+      ]
+    },
+    "simfamheader_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["altcategory_uid"],
+      "columns": [
+              { "name": "family_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "safety_stock","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "is_active", "type": "int","allowed_values": [0, 1], "required": false, "solutions":["inventory"] },
+              { "name": "name", "type": "varchar", "required": false, "solutions":["inventory"] }
+      ]
+    },
+    "simfambody_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["item_uid"],
+      "columns": [
+              { "name": "item_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "family_uid","type": "varchar", "required": true, "solutions":["inventory"] }
+      ]
+    },
+    "simfamdelete_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["item_uid"],
+      "columns": [
+              { "name": "item_uid","type": "varchar", "required": true, "solutions":["inventory"] }
+      ]
+    },
+    "forecastsales_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["item_uid","store_uid"],
+      "columns": [
+              { "name": "item_uid","type": "varchar", "required": true, "solutions":["shelf"] },
+              { "name": "store_uid", "type": "varchar", "required": true, "solutions":["shelf"] },
+              { "name": "week_date","type": "date", "required": true,"format": "%Y-%m-%d","solutions":["shelf"] },
+              { "name": "sold_qty","type": "numeric", "min": 0, "required": true, "solutions":["shelf"] },
+              { "name": "revenue","type": "numeric", "min": 0, "required": true, "solutions":["shelf"] },
+              { "name": "date","type": "date", "required": true, "format": "%Y-%m-%d","solutions":["shelf"] }
+      ]
+    },
+    "promoheader_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["promo_uid"],
+      "columns": [
+              { "name": "promo_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "name","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "buffer_type","type": "int","allowed_values": [0,1,2,3,4,5,6,7,8], "required": true, "solutions":["inventory"] },
+              { "name": "begin_date","type": "date", "required": false, "format": "%Y-%m-%d","solutions":["inventory"] },
+              { "name": "end_date","type": "date", "required": false, "format": "%Y-%m-%d","solutions":["inventory"] },
+              { "name": "buffer_change","type": "int","allowed_values": [0,1], "required": false, "solutions":["inventory"] },
+              { "name": "ignore_max_buffer","type": "int","allowed_values": [0,1], "required": false, "solutions":["inventory"] },
+              { "name": "check_cur_buffer","type": "int","allowed_values": [0,1], "required": false, "solutions":["inventory"] },
+              { "name": "avg_sale_from","type": "date", "required": false, "format": "%Y-%m-%d","solutions":["inventory"] },
+              { "name": "avg_sale_to","type": "date", "required": false, "format": "%Y-%m-%d","solutions":["inventory"] },
+              { "name": "avg_sale_based_on","type": "int","allowed_values": [0,1,2], "required": false, "solutions":["inventory"] },
+              { "name": "last_non_promo_buffer","type": "int","allowed_values": [0,1], "required": false, "solutions":["inventory"] },
+              { "name": "buffer_date","type": "date", "required": false, "format": "%Y-%m-%d","solutions":["inventory"] },
+              { "name": "freeze_buffer_date","type": "date", "required": false, "format": "%Y-%m-%d","solutions":["inventory"] },
+              { "name": "end_promo_action","type": "int","allowed_values": [0,1,2,3], "required": false, "solutions":["inventory"] },
+              { "name": "first_order_delivery_date","type": "date", "required": false, "format": "%Y-%m-%d","solutions":["inventory"] },
+              { "name": "max_valid_days","type": "int","allowed_values": [7,10,14,21], "required": false, "solutions":["inventory"] },
+              { "name": "sell_safety_stock","type": "int","allowed_values": [0,1], "required": false, "solutions":["inventory"] },
+              { "name": "sell_safety_stock_date","type": "date", "required": false, "format": "%Y-%m-%d","solutions":["inventory"] },
+              { "name": "promo_type_uid","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "promo_mechanic_uid","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "promo_advertising_uid","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "refill_percentage","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "forecast_approve_type","type": "int","allowed_values": [0,1,2], "required": false, "solutions":["inventory"] }
+      ]
+    },
+    "promobody_.*.csv": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "unique_fields": ["promo_uid","item_uid","store_uid"],
+      "columns": [
+              { "name": "promo_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "item_uid","type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "store_uid", "type": "varchar", "required": true, "solutions":["inventory"] },
+              { "name": "ratio","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "buffer","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "promo_safety_stock_1","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "promo_safety_stock_2","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "promo_safety_stock_3","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "promo_safety_stock_4","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "promo_safety_stock_5","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "order_once","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "promo_mechanic_uid","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "promo_advertising_uid","type": "varchar", "required": false, "solutions":["inventory"] },
+              { "name": "price_before_promo","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "promo_price","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "refill_percentage","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "is_deleted","type": "int","allowed_values": [0,1], "required": false, "solutions":["inventory"] },
+              { "name": "initial_adu","type": "numeric", "min": 0, "required": false, "solutions":["inventory"] },
+              { "name": "sell_safety_stock_date","type": "date", "required": false, "format": "%Y-%m-%d","solutions":["inventory"] },
+              { "name": "first_order_delivery_date","type": "date", "required": false, "format": "%Y-%m-%d","solutions":["inventory"] }
+      ]
+    }
+}

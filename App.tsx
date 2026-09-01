@@ -1,10 +1,13 @@
 
 
 import React, { useState, useCallback, useRef } from 'react';
-import { FolderUp, Download, RefreshCw, AlertTriangle, CheckCircle, Loader2, FileText, XCircle, Settings } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { FolderUp, Download, RefreshCw, AlertTriangle, CheckCircle, Loader2, FileText, XCircle, Settings, PenLine } from 'lucide-react';
 import JSZip from 'jszip';
 import { runExcelWorker } from './services/workerClient.ts';
-import type { StatusUpdate, FileType, CsvFile, CsvGenerationOptions } from './types.ts';
+import { setPendingEditorData, csvFilesToEditorEntries } from './lib/editorStore.ts';
+import { validateCsvContent } from './services/csvValidator.ts';
+import type { StatusUpdate, FileType, CsvFile, CsvGenerationOptions, Solution, FileValidationResult } from './types.ts';
 
 // Fix for non-standard directory attributes on input element
 declare module 'react' {
@@ -56,6 +59,7 @@ const ALL_OUTPUT_COLUMNS = [
 ];
 
 export const App: React.FC = () => {
+    const navigate = useNavigate();
     const [fileInfos, setFileInfos] = useState<FileInfo[]>([]);
     const [archiveName, setArchiveName] = useState<string>('data_export');
     const [processingState, setProcessingState] = useState<ProcessingState>('idle');
@@ -67,7 +71,10 @@ export const App: React.FC = () => {
     const [isAdvancedOptionsOpen, setIsAdvancedOptionsOpen] = useState(false);
     const [selectedColumns, setSelectedColumns] = useState<Record<string, boolean>>({});
     const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
-    const [generatedFilesSummary, setGeneratedFilesSummary] = useState<{ name: string, rowCount: number }[]>([]);
+    const [generatedFilesSummary, setGeneratedFilesSummary] = useState<{ name: string, rowCount: number, content: string }[]>([]);
+    const [selectedSolutions, setSelectedSolutions] = useState<Solution[]>(['shelf']);
+    const [validationResults, setValidationResults] = useState<FileValidationResult[]>([]);
+    const [expandedValidationFile, setExpandedValidationFile] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -79,6 +86,8 @@ export const App: React.FC = () => {
         setCsvOptions({ delimiter: ',' });
         setColumnMapping({});
         setGeneratedFilesSummary([]);
+        setValidationResults([]);
+        setExpandedValidationFile(null);
         if (zipUrl) {
             URL.revokeObjectURL(zipUrl);
         }
@@ -221,7 +230,13 @@ export const App: React.FC = () => {
         }
 
         if (allGeneratedCsvs.length > 0) {
-            setGeneratedFilesSummary(allGeneratedCsvs.map(csv => ({ name: csv.name, rowCount: csv.rowCount })));
+            setGeneratedFilesSummary(allGeneratedCsvs.map(csv => ({ name: csv.name, rowCount: csv.rowCount, content: csv.content })));
+
+            const validationRes = allGeneratedCsvs
+                .map(csv => validateCsvContent(csv.content, csv.name, selectedSolutions))
+                .filter(r => r.schemaDetected);
+            setValidationResults(validationRes);
+
             // FIX: Wrap zip generation in a try-catch block to handle potential errors.
             try {
                 allGeneratedCsvs.forEach(csv => {
@@ -251,7 +266,7 @@ export const App: React.FC = () => {
             }
         }
 
-    }, [fileInfos, archiveName, csvOptions, selectedColumns, columnMapping]);
+    }, [fileInfos, archiveName, csvOptions, selectedColumns, columnMapping, selectedSolutions]);
 
     const handleReset = () => {
         setFileInfos([]);
@@ -414,7 +429,30 @@ export const App: React.FC = () => {
                             />
                         </div>
                     )}
-                    
+
+                    {fileInfos.length > 0 && (
+                        <div className="pt-4 border-t border-gray-200">
+                            <p className="text-sm font-semibold text-gray-700 mb-0.5">Validate against solution</p>
+                            <p className="text-xs text-gray-400 mb-2">Determines which fields are required during validation</p>
+                            <div className="flex gap-5">
+                                {(['shelf', 'assortment'] as Solution[]).map(sol => (
+                                    <label key={sol} className="flex items-center gap-2 cursor-pointer select-none">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedSolutions.includes(sol)}
+                                            onChange={() => setSelectedSolutions(prev =>
+                                                prev.includes(sol) ? prev.filter(s => s !== sol) : [...prev, sol]
+                                            )}
+                                            disabled={processingState === 'processing'}
+                                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-focus disabled:opacity-50"
+                                        />
+                                        <span className="text-sm capitalize text-gray-700">{sol}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     {processingState !== 'processing' && errorMessage && (
                         <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md" role="alert">
                             <div className="flex">
@@ -476,16 +514,78 @@ export const App: React.FC = () => {
                         </div>
                     )}
 
+                    {validationResults.length > 0 && (() => {
+                        const filesWithErrors = validationResults.filter(r => r.errorCount > 0);
+                        const allOk = filesWithErrors.length === 0;
+                        return (
+                            <div className={`rounded-lg border p-4 space-y-3 ${allOk ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                                <div className={`flex items-center gap-2 font-semibold text-sm ${allOk ? 'text-green-700' : 'text-red-700'}`}>
+                                    {allOk
+                                        ? <><CheckCircle className="w-4 h-4 shrink-0" /> Validation passed — all {validationResults.length} file{validationResults.length !== 1 ? 's' : ''} OK</>
+                                        : <><AlertTriangle className="w-4 h-4 shrink-0" /> Validation: {filesWithErrors.length} of {validationResults.length} file{validationResults.length !== 1 ? 's' : ''} have errors</>
+                                    }
+                                </div>
+                                <div className="space-y-1">
+                                    {validationResults.map(r => (
+                                        <div key={r.filename} className="text-xs">
+                                            <button
+                                                type="button"
+                                                onClick={() => setExpandedValidationFile(prev => prev === r.filename ? null : r.filename)}
+                                                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-left transition-colors ${
+                                                    r.errorCount === 0
+                                                        ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                                                        : 'bg-red-100 text-red-800 hover:bg-red-200'
+                                                }`}
+                                            >
+                                                <span className="font-medium truncate mr-2">{r.filename}</span>
+                                                <span className="shrink-0">
+                                                    {r.errorCount === 0 ? '✓ OK' : `${r.errorCount} error${r.errorCount !== 1 ? 's' : ''}`}
+                                                    {r.errorCount > 0 && <span className="ml-1 text-red-500">{expandedValidationFile === r.filename ? '▲' : '▼'}</span>}
+                                                </span>
+                                            </button>
+                                            {expandedValidationFile === r.filename && r.errors.length > 0 && (
+                                                <div className="mt-1 ml-2 border-l-2 border-red-300 pl-3 space-y-0.5 max-h-48 overflow-y-auto">
+                                                    {r.errors.map((e, i) => (
+                                                        <div key={i} className="text-red-700 flex gap-2">
+                                                            <span className="shrink-0 font-mono text-gray-400 w-14">
+                                                                {e.row === 0 ? 'header' : `row ${e.row}`}
+                                                            </span>
+                                                            {e.field && <span className="shrink-0 font-medium text-red-600">{e.field}:</span>}
+                                                            <span>{e.message}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        );
+                    })()}
+
                     {processingState === 'success' && zipUrl && (
                         <div className="pt-4 border-t border-gray-200">
                             <a
                                 href={zipUrl}
                                 download={zipFileName}
-                                className="w-full inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-secondary hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-all duration-300 mb-4"
+                                className="w-full inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-secondary hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-all duration-300 mb-3"
                             >
                                 <Download className="-ml-1 mr-3 h-5 w-5"/>
                                 Download ZIP File ({zipFileName})
                             </a>
+                            <button
+                                onClick={() => {
+                                    const entries = csvFilesToEditorEntries(generatedFilesSummary);
+                                    if (entries.length) {
+                                        setPendingEditorData(entries);
+                                        navigate('/editor');
+                                    }
+                                }}
+                                className="w-full inline-flex justify-center items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors mb-4"
+                            >
+                                <PenLine className="-ml-1 mr-3 h-5 w-5 text-primary"/>
+                                Open in Editor
+                            </button>
 
                             {generatedFilesSummary.length > 0 && (
                                 <div className="mt-4 bg-gray-50 rounded-lg p-4 border border-gray-200">
