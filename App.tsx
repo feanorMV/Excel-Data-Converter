@@ -1,12 +1,13 @@
 
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FolderUp, Download, RefreshCw, AlertTriangle, CheckCircle, Loader2, FileText, XCircle, Settings, PenLine } from 'lucide-react';
+import { FolderUp, Download, RefreshCw, AlertTriangle, CheckCircle, Loader2, FileText, XCircle, Settings, PenLine, Eye, X } from 'lucide-react';
 import JSZip from 'jszip';
 import { runExcelWorker } from './services/workerClient.ts';
 import { setPendingEditorData, csvFilesToEditorEntries } from './lib/editorStore.ts';
 import { validateCsvContent } from './services/csvValidator.ts';
+import { parseCsv, detectDelimiter } from './lib/csv.ts';
 import type { StatusUpdate, FileType, CsvFile, CsvGenerationOptions, Solution, FileValidationResult } from './types.ts';
 
 // Fix for non-standard directory attributes on input element
@@ -58,6 +59,90 @@ const ALL_OUTPUT_COLUMNS = [
     'unit_name', 'width', 'height', 'depth', 'netweight', 'volume', 'dimension_uid', 'coef', 'parent_category_uid'
 ];
 
+const ROW_HEIGHT = 28; // px per data row
+const OVERSCAN   = 20; // extra rows rendered above/below viewport
+
+const CsvPreviewModal: React.FC<{ name: string; content: string; onClose: () => void }> = ({ name, content, onClose }) => {
+    const delimiter = detectDelimiter(content.split('\n', 1)[0] ?? '');
+    const rows      = parseCsv(content, delimiter);
+    const headers   = rows[0] ?? [];
+    const dataRows  = rows.slice(1);
+    const total     = dataRows.length;
+
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [scrollTop, setScrollTop]   = useState(0);
+    const [viewHeight, setViewHeight] = useState(500);
+
+    useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        setViewHeight(el.clientHeight);
+        const onScroll = () => setScrollTop(el.scrollTop);
+        el.addEventListener('scroll', onScroll, { passive: true });
+        return () => el.removeEventListener('scroll', onScroll);
+    }, []);
+
+    const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+    const endIdx   = Math.min(total - 1, Math.ceil((scrollTop + viewHeight) / ROW_HEIGHT) + OVERSCAN);
+    const topPad   = startIdx * ROW_HEIGHT;
+    const botPad   = Math.max(0, (total - endIdx - 1) * ROW_HEIGHT);
+    const visible  = dataRows.slice(startIdx, endIdx + 1);
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-6xl max-h-[90vh]">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
+                    <div>
+                        <h2 className="font-semibold text-gray-900 text-sm">{name}</h2>
+                        <p className="text-xs text-gray-400 mt-0.5">{total.toLocaleString()} rows</p>
+                    </div>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+
+                {/* single container — one scroll for both axes, thead is sticky */}
+                <div ref={containerRef} className="overflow-auto flex-1">
+                    <table className="text-xs border-collapse w-max min-w-full">
+                        <thead className="sticky top-0 z-10">
+                            <tr className="bg-gray-100">
+                                <th className="sticky left-0 z-20 bg-gray-100 border-r border-b-2 border-gray-300 px-2 py-2 text-center font-semibold text-gray-400 w-10 select-none">
+                                    #
+                                </th>
+                                {headers.map((h, i) => (
+                                    <th key={i} className="border-r border-b-2 border-gray-300 px-3 py-2 text-left font-semibold text-gray-700 whitespace-nowrap">
+                                        {h}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {topPad > 0 && <tr style={{ height: topPad }}><td colSpan={headers.length + 1} /></tr>}
+                            {visible.map((row, ri) => (
+                                <tr
+                                    key={startIdx + ri}
+                                    className={(startIdx + ri) % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
+                                    style={{ height: ROW_HEIGHT }}
+                                >
+                                    <td className="sticky left-0 z-10 bg-inherit border-r border-b border-gray-100 px-2 py-1 text-center text-gray-400 font-mono text-[10px] w-10 select-none">
+                                        {startIdx + ri + 1}
+                                    </td>
+                                    {headers.map((_, ci) => (
+                                        <td key={ci} className="border-r border-b border-gray-100 px-3 py-1 text-gray-700 whitespace-nowrap max-w-[300px] overflow-hidden text-ellipsis" title={row[ci]}>
+                                            {row[ci] ?? ''}
+                                        </td>
+                                    ))}
+                                </tr>
+                            ))}
+                            {botPad > 0 && <tr style={{ height: botPad }}><td colSpan={headers.length + 1} /></tr>}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export const App: React.FC = () => {
     const navigate = useNavigate();
     const [fileInfos, setFileInfos] = useState<FileInfo[]>([]);
@@ -75,6 +160,7 @@ export const App: React.FC = () => {
     const [selectedSolutions, setSelectedSolutions] = useState<Solution[]>(['shelf']);
     const [validationResults, setValidationResults] = useState<FileValidationResult[]>([]);
     const [expandedValidationFile, setExpandedValidationFile] = useState<string | null>(null);
+    const [previewFile, setPreviewFile] = useState<{ name: string, content: string } | null>(null);
     const filesInputRef = useRef<HTMLInputElement>(null);
     const folderInputRef = useRef<HTMLInputElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
@@ -89,6 +175,7 @@ export const App: React.FC = () => {
         setGeneratedFilesSummary([]);
         setValidationResults([]);
         setExpandedValidationFile(null);
+        setPreviewFile(null);
         if (zipUrl) {
             URL.revokeObjectURL(zipUrl);
         }
@@ -616,8 +703,16 @@ export const App: React.FC = () => {
                                     <h4 className="text-md font-semibold mb-3 text-gray-800">Generated Files Summary:</h4>
                                     <ul className="space-y-2 text-sm text-gray-600 max-h-60 overflow-y-auto pr-2">
                                         {generatedFilesSummary.map((file, idx) => (
-                                            <li key={idx} className="flex justify-between items-center border-b border-gray-100 pb-2 last:border-0 last:pb-0">
-                                                <span className="font-medium text-gray-700 truncate mr-4" title={file.name}>{file.name}</span>
+                                            <li
+                                                key={idx}
+                                                onClick={() => setPreviewFile({ name: file.name, content: file.content })}
+                                                className="flex justify-between items-center border-b border-gray-100 pb-2 last:border-0 last:pb-0 cursor-pointer hover:bg-white rounded px-2 -mx-2 py-1 transition-colors group"
+                                                title="Click to preview"
+                                            >
+                                                <span className="font-medium text-gray-700 truncate mr-4 flex items-center gap-1.5">
+                                                    <Eye className="w-3.5 h-3.5 text-gray-400 group-hover:text-primary shrink-0 transition-colors" />
+                                                    {file.name}
+                                                </span>
                                                 <span className="bg-white px-2 py-1 rounded shadow-sm text-xs font-bold text-primary whitespace-nowrap">
                                                     {file.rowCount.toLocaleString()} rows
                                                 </span>
@@ -635,6 +730,14 @@ export const App: React.FC = () => {
                     </p>
                 </footer>
             </div>
+
+            {previewFile && (
+                <CsvPreviewModal
+                    name={previewFile.name}
+                    content={previewFile.content}
+                    onClose={() => setPreviewFile(null)}
+                />
+            )}
 
             {isAdvancedOptionsOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
