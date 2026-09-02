@@ -152,6 +152,17 @@ function getValueByPossibleKeys(row: any, keywords: string[]): any {
     return null;
 }
 
+// "Add N" / additional_N fields are optional and freeform — a client may put a
+// number in one and text in another, with no fixed schema saying which is which.
+// Parse to a number only when the whole value is numeric; otherwise keep the text.
+function parseAddValue(val: any): string | number | null {
+    if (val === null || val === undefined) return null;
+    const str = String(val).trim();
+    if (str === '') return null;
+    const normalized = str.replace(',', '.');
+    return /^-?\d+(\.\d+)?$/.test(normalized) ? parseFloat(normalized) : str;
+}
+
 function getIsDeletedValue(row: any): number {
     // Try explicit keys using our flexible helper
     const val = getValueByPossibleKeys(row, ['is_deleted', 'isDeleted', 'Deleted', 'delete', 'To Delete', 'Removed', 'Inactive']);
@@ -817,47 +828,43 @@ async function processItemMasterV2File(workbook: any, sheetName: string, updateS
             effectiveManufUid = manufNameValue;
         }
 
-        const getAddVal = (row: any, num: number) => row[`Add ${num}`] ?? row[`additional_${num}`];
-        const getFloatAddVal = (row: any, num: number) => {
-            const val = getAddVal(row, num);
-            return val !== null && val !== undefined && String(val).trim() !== '' ? (parseFloat(String(val).replace(',', '.')) || null) : null;
-        };
+        const getAddVal = (row: any, num: number) => parseAddValue(row[`Add ${num}`] ?? row[`additional_${num}`]);
 
         const isDel = getIsDeletedValue(row);
         const existingIdx = masteritemsData.findIndex(r => String(r.item_uid).trim() === item_uid);
-        
+
         if (existingIdx !== -1) {
             if (isDel === 1) {
                 masteritemsData[existingIdx].is_deleted = 1;
             }
         } else {
             masteritemsData.push({
-                item_uid: item_uid, 
-                name: getValueByPossibleKeys(row, ['Product name*', 'Product name', 'Name']), 
-                manufacturer_uid: effectiveManufUid, 
+                item_uid: item_uid,
+                name: getValueByPossibleKeys(row, ['Product name*', 'Product name', 'Name']),
+                manufacturer_uid: effectiveManufUid,
                 brand_uid: effectiveBrandUid,
                 is_fractional: getValueByPossibleKeys(row, ['Is fractional?']) ? parseInt(String(getValueByPossibleKeys(row, ['Is fractional?'])), 10) || 0 : 0,
                 main_unit_uid: main_unit_uid, is_deleted: isDel,
-                additional_1: getFloatAddVal(row, 1),
+                additional_1: getAddVal(row, 1),
                 additional_2: getAddVal(row, 2),
                 additional_3: getAddVal(row, 3),
                 additional_4: getAddVal(row, 4),
-                additional_5: getFloatAddVal(row, 5),
-                additional_6: getFloatAddVal(row, 6),
+                additional_5: getAddVal(row, 5),
+                additional_6: getAddVal(row, 6),
                 additional_7: getAddVal(row, 7),
-                additional_8: getFloatAddVal(row, 8),
-                additional_9: getFloatAddVal(row, 9),
-                additional_10: getFloatAddVal(row, 10),
-                additional_11: getFloatAddVal(row, 11),
-                additional_12: getFloatAddVal(row, 12),
-                additional_13: getFloatAddVal(row, 13),
-                additional_14: getFloatAddVal(row, 14),
-                additional_15: getFloatAddVal(row, 15),
-                additional_16: getFloatAddVal(row, 16),
-                additional_17: getFloatAddVal(row, 17),
-                additional_18: getFloatAddVal(row, 18),
-                additional_19: getFloatAddVal(row, 19),
-                additional_20: getFloatAddVal(row, 20),
+                additional_8: getAddVal(row, 8),
+                additional_9: getAddVal(row, 9),
+                additional_10: getAddVal(row, 10),
+                additional_11: getAddVal(row, 11),
+                additional_12: getAddVal(row, 12),
+                additional_13: getAddVal(row, 13),
+                additional_14: getAddVal(row, 14),
+                additional_15: getAddVal(row, 15),
+                additional_16: getAddVal(row, 16),
+                additional_17: getAddVal(row, 17),
+                additional_18: getAddVal(row, 18),
+                additional_19: getAddVal(row, 19),
+                additional_20: getAddVal(row, 20),
                 erp_category_uid: erpCategoryUid
             });
         }
@@ -992,15 +999,13 @@ async function processItemMasterUpdatedFile(workbook: any, sheetName: string, up
 
         newRow['is_deleted'] = getIsDeletedValue(row);
 
-        // Extract additional_1 to additional_20 if present, fallback to Segment Description etc for 1-4
+        // Extract additional_1 to additional_20 if present, fallback to Segment Description etc for 1-4.
+        // These are optional freeform fields — a value may be numeric or text depending on the
+        // client's template, so parse to a number only when the whole value is numeric.
         for (let j = 1; j <= 20; j++) {
-            const val = row[`Add ${j}`] ?? row[`additional_${j}`];
-            if (val !== undefined && val !== null && String(val).trim() !== '') {
-                if ([2, 3, 4, 7].includes(j)) {
-                    newRow[`additional_${j}`] = val; // text
-                } else {
-                    newRow[`additional_${j}`] = parseFloat(String(val).replace(',', '.')) || null; // float
-                }
+            const parsed = parseAddValue(row[`Add ${j}`] ?? row[`additional_${j}`]);
+            if (parsed !== null) {
+                newRow[`additional_${j}`] = parsed;
             } else if (j > 4 && !( `additional_${j}` in newRow )) {
                 newRow[`additional_${j}`] = null;
             }
